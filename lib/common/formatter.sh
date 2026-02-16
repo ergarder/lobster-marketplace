@@ -86,15 +86,13 @@ format_stocks() {
         filter='select(.stock < 10)'
     fi
     
-    echo "$json" | jq -r --argjson show_low "$show_low" '
-        .result.rows[] | '"$filter"' |
-        "SKU: \(.sku)\n" +
-        "📦 Название: \(.name // \"не указано\")\n" +
-        "📊 Остаток: \(.stock) шт\n" +
-        (if .stock < 10 then "⚠️  НИЗКИЙ ОСТАТОК!\n" else "" end) +
-        "🏢 Склад: \(.warehouse_name // \"не указан\")\n" +
-        "---"
-    '
+    echo "$json" | jq -r '.result.rows[] | '"$filter"' | 
+"SKU: \(.sku)
+📦 Название: \(.name // "не указано")
+📊 Остаток: \(.stock) шт" +
+(if .stock < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end) + "
+🏢 Склад: \(.warehouse_name // "не указан")
+---"'
 }
 
 # Конвертировать ISO дату в человеческий формат
