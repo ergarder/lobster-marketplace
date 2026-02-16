@@ -279,6 +279,55 @@ sudo apt-get install jq
 brew install jq
 ```
 
+## 📋 Audit Log
+
+Все изменения цен и остатков записываются в structured audit log:
+
+```
+~/.openclaw/marketplace/audit.log
+```
+
+**Формат:** `TIMESTAMP|USER|BATCH_ID|ACTION|SKU|OLD_VALUE|NEW_VALUE|STATUS`
+
+**Просмотр истории:**
+```bash
+mp-prices history                    # Последние 20 записей
+mp-prices history --sku TWS-PRO-001  # История SKU
+mp-prices history --last 50          # Последние 50 записей
+```
+
+**Ротация:** Записи старше 90 дней удаляются автоматически.
+
+## 🔄 Rollback
+
+Откат batch-операций по BATCH_ID из audit log:
+
+```bash
+mp-prices rollback --last            # Откатить последний batch
+mp-prices rollback 20260216-143022-a1b2c3d4  # По конкретному ID
+mp-stocks rollback --last --mock     # Тест в mock режиме
+```
+
+**Важно:**
+- Rollback всегда требует ручного подтверждения (`--yes` не работает)
+- Нельзя откатить batch с ошибками (все записи должны быть `success`)
+- Каждый rollback создаёт свой batch в audit log
+
+## 🚦 Batch Rate Limiting
+
+Массовые операции автоматически разбиваются на чанки:
+
+- **Chunk size:** 10 (настраивается через `BATCH_SIZE`)
+- **Delay:** 1 секунда между чанками (`BATCH_DELAY`)
+- **429 handling:** Exponential backoff (5s → 15s → 30s)
+- **Progress:** `[30/100] Processing batch 3/10... ETA: 7s`
+
+## ⚠️ Known Limitations
+
+- Race condition detection — optimistic (two GET requests), не транзакционный lock
+- Rollback не поддерживает `--continue` после partial failure (в планах)
+- Batch execute пока доступен только как API (`batch_execute`), не из CLI
+
 ## 🔒 Безопасность
 
 - **Credentials хранятся локально** в `~/.openclaw/marketplace/credentials.env`

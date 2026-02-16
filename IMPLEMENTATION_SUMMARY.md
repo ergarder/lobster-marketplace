@@ -3,7 +3,7 @@
 **Дата:** 2026-02-16  
 **Ветка:** `feat/ozon-mvp`  
 **Tag:** `v0.1.0-mvp`  
-**Статус:** ✅ Завершено (28/28 задач)
+**Статус:** ✅ Завершено (36/36 задач, включая risk fixes)
 
 ---
 
@@ -46,6 +46,16 @@
 26. ✅ `SKILL.md` — описание для OpenClaw агента (команды, use cases)
 27. ✅ `examples/morning-digest.sh` — пример утреннего отчёта
 28. ✅ `.gitignore` — исключить credentials.env
+
+### Phase 6: Risk Fixes (8/8) ✅
+29. ✅ R2: `lib/common/audit.sh` — Structured audit log (TIMESTAMP|USER|BATCH_ID|ACTION|SKU|OLD|NEW|STATUS), flock, 90-day rotation
+30. ✅ R1: Rollback mechanism — `rollback_batch()`, `mp-prices rollback`, `mp-stocks rollback`
+31. ✅ R3: Batch rate limiting — `batch_execute()` chunk_size=10, delay=1s, progress bar
+32. ✅ R4: `calculate_change_percent` — handles 0→"новый товар", empty→"N/A", non-numeric→"N/A"
+33. ✅ R5: Race condition detection — stale value check before update, mandatory prompt
+34. ✅ R6: Curl timeout — `--max-time 30 --connect-timeout 10`, configurable via env vars
+35. ✅ R7: Input validation — negative stock block, zero-stock warning, zero-price block
+36. ✅ R8: `--yes` restriction — blocked for >50% changes, `--force` flag for automation
 
 ---
 
