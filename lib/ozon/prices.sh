@@ -81,6 +81,8 @@ update_price() {
     local new_price=$2
     local mock_mode=false
     local old_price=""
+    local batch_id="${BATCH_ID:-}"
+    local current_price_for_audit=""
     
     shift 2
     while [[ $# -gt 0 ]]; do
@@ -91,6 +93,14 @@ update_price() {
                 ;;
             --old-price)
                 old_price="$2"
+                shift 2
+                ;;
+            --batch-id)
+                batch_id="$2"
+                shift 2
+                ;;
+            --audit-old-price)
+                current_price_for_audit="$2"
                 shift 2
                 ;;
             *)
@@ -110,10 +120,25 @@ update_price() {
         return 1
     fi
     
+    # Проверка цены на 0 (R7)
+    if [[ "$new_price" == "0" ]] || [[ "$new_price" == "0.00" ]] || [[ "$new_price" == "0.0" ]]; then
+        echo "ERROR: Цена не может быть 0 ₽" >&2
+        return 1
+    fi
+    
+    # Audit log: записать pending
+    if [[ -n "$batch_id" ]] && type audit_log_change &>/dev/null; then
+        audit_log_change "price_update" "$sku" "${current_price_for_audit:-unknown}" "$new_price" "$batch_id" "pending"
+    fi
+    
     log_debug "update_price called with sku=$sku new_price=$new_price mock=$mock_mode"
     
     # Mock режим
     if [[ "$mock_mode" == "true" ]]; then
+        # Audit: mark success
+        if [[ -n "$batch_id" ]] && type audit_update_status &>/dev/null; then
+            audit_update_status "$batch_id" "$sku" "success"
+        fi
         cat <<EOF
 {
   "result": [
@@ -152,7 +177,21 @@ EOF
 EOF
 )
     
-    ozon_request "POST" "/v1/product/import/prices" "$request_data"
+    local response
+    response=$(ozon_request "POST" "/v1/product/import/prices" "$request_data")
+    local result=$?
+    
+    # Audit: обновить статус
+    if [[ -n "$batch_id" ]] && type audit_update_status &>/dev/null; then
+        if [[ $result -eq 0 ]]; then
+            audit_update_status "$batch_id" "$sku" "success"
+        else
+            audit_update_status "$batch_id" "$sku" "fail"
+        fi
+    fi
+    
+    echo "$response"
+    return $result
 }
 
 # Валидировать изменение цены (не более ±50%)

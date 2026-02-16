@@ -13,6 +13,7 @@ source "${LIB_DIR}/ozon/auth.sh"
 source "${LIB_DIR}/common/http.sh"
 source "${LIB_DIR}/common/formatter.sh"
 source "${LIB_DIR}/ozon/stocks.sh"
+source "${LIB_DIR}/common/audit.sh"
 
 # Цвета для вывода
 GREEN='\033[0;32m'
@@ -31,6 +32,9 @@ show_help() {
   list --low                   Показать только товары с низкими остатками (< 10)
   get <sku>                    Показать остаток конкретного товара
   update <sku> <quantity>      Обновить остаток товара
+  rollback <batch-id>          Откатить batch изменений
+  rollback --last              Откатить последний batch
+  history [--sku <sku>] [--last <N>]  Показать историю изменений
 
 Опции:
   --mock                       Использовать mock данные (для тестирования без API)
@@ -183,6 +187,7 @@ cmd_update() {
     fi
     
     local is_mock=false
+    local auto_confirm=false
     local update_args=("$sku" "$new_quantity")
     
     while [[ $# -gt 0 ]]; do
@@ -196,11 +201,18 @@ cmd_update() {
                 update_args+=("--warehouse" "$2")
                 shift 2
                 ;;
+            --yes)
+                auto_confirm=true
+                shift
+                ;;
             *)
                 shift
                 ;;
         esac
     done
+    
+    # Генерировать BATCH_ID для audit
+    export BATCH_ID=$(audit_generate_batch_id)
     
     # Загрузить credentials если не mock режим
     if [[ "$is_mock" == "false" ]]; then
@@ -237,15 +249,43 @@ cmd_update() {
     fi
     
     # Подтверждение
-    read -p "Подтвердите обновление остатка (y/N): " confirm
+    if [[ "$auto_confirm" == "false" ]]; then
+        read -p "Подтвердите обновление остатка (y/N): " confirm
+        
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Отменено"
+            exit 0
+        fi
+    fi
     
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo "Отменено"
-        exit 0
+    # Race condition detection (R5): проверить что остаток не изменился
+    if [[ -n "$current_stock_data" ]]; then
+        local fresh_stock_data=$(get_stock_by_sku "${get_args[@]}")
+        if [[ -n "$fresh_stock_data" ]]; then
+            local fresh_quantity=$(echo "$fresh_stock_data" | jq -r '.stock')
+            local stocks_match=$(awk -v a="${old_quantity:-0}" -v b="$fresh_quantity" 'BEGIN {print (a == b) ? "yes" : "no"}')
+            if [[ "$stocks_match" == "no" ]]; then
+                echo ""
+                echo -e "${RED}⚠️ ВНИМАНИЕ: Остаток изменился с момента проверки!${NC}"
+                echo "   Было: ${old_quantity} шт (при проверке)"
+                echo "   Сейчас: ${fresh_quantity} шт (кто-то изменил)"
+                echo "   Ваше значение: $new_quantity шт"
+                echo ""
+                # --yes НЕ пропускает этот prompt (safety critical)
+                read -p "Продолжить? (y/N): " race_confirm
+                if [[ ! "$race_confirm" =~ ^[Yy]$ ]]; then
+                    echo "Отменено"
+                    exit 0
+                fi
+            fi
+        fi
     fi
     
     echo ""
     echo "🔄 Обновление остатка..."
+    
+    # Добавить audit параметры
+    update_args+=("--batch-id" "$BATCH_ID" "--audit-old-stock" "${old_quantity:-unknown}")
     
     # Выполнить обновление
     local update_json=$(update_stock "${update_args[@]}")
@@ -275,6 +315,51 @@ cmd_update() {
     fi
 }
 
+# Команда: rollback - откатить batch
+cmd_rollback() {
+    local batch_id=""
+    local is_mock=false
+    local use_last=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --last)
+                use_last=true
+                shift
+                ;;
+            --mock)
+                is_mock=true
+                shift
+                ;;
+            *)
+                batch_id="$1"
+                shift
+                ;;
+        esac
+    done
+    
+    if [[ "$use_last" == "true" ]]; then
+        batch_id=$(audit_get_last_batch_id "stock_update")
+        if [[ -z "$batch_id" ]]; then
+            echo "ERROR: Нет предыдущих batch для отката" >&2
+            exit 1
+        fi
+        echo "Последний batch: $batch_id"
+    fi
+    
+    if [[ -z "$batch_id" ]]; then
+        echo "ERROR: Укажите batch ID или используйте --last" >&2
+        exit 1
+    fi
+    
+    rollback_batch "$batch_id" "stock" "$is_mock"
+}
+
+# Команда: history - показать историю изменений
+cmd_history() {
+    audit_show_history "$@"
+}
+
 # Main
 case "${1:-}" in
     list)
@@ -288,6 +373,14 @@ case "${1:-}" in
     update)
         shift
         cmd_update "$@"
+        ;;
+    rollback)
+        shift
+        cmd_rollback "$@"
+        ;;
+    history)
+        shift
+        cmd_history "$@"
         ;;
     -h|--help|help)
         show_help

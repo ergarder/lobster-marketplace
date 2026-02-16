@@ -128,6 +128,8 @@ update_stock() {
     local new_quantity=$2
     local mock_mode=false
     local warehouse_id=""
+    local batch_id="${BATCH_ID:-}"
+    local current_stock_for_audit=""
     
     shift 2
     while [[ $# -gt 0 ]]; do
@@ -138,6 +140,14 @@ update_stock() {
                 ;;
             --warehouse)
                 warehouse_id="$2"
+                shift 2
+                ;;
+            --batch-id)
+                batch_id="$2"
+                shift 2
+                ;;
+            --audit-old-stock)
+                current_stock_for_audit="$2"
                 shift 2
                 ;;
             *)
@@ -151,16 +161,40 @@ update_stock() {
         return 1
     fi
     
+    # Explicit negative check (defense-in-depth, R7)
+    if [[ "$new_quantity" =~ ^- ]]; then
+        echo "ERROR: Количество не может быть отрицательным: $new_quantity" >&2
+        return 1
+    fi
+    
     # Валидация количества
     if ! [[ "$new_quantity" =~ ^[0-9]+$ ]]; then
         echo "ERROR: Количество должно быть целым числом: $new_quantity" >&2
         return 1
     fi
     
+    # Предупреждение при stock=0 (R7)
+    if [[ "$new_quantity" == "0" ]]; then
+        echo "⚠️ WARNING: Установка остатка в 0 отключит товар на площадке!" >&2
+        if [[ "${AUTO_CONFIRM_ZERO:-false}" != "true" ]]; then
+            read -p "Продолжить? (y/N): " confirm_zero
+            [[ ! "$confirm_zero" =~ ^[Yy]$ ]] && return 1
+        fi
+    fi
+    
+    # Audit log: записать pending
+    if [[ -n "$batch_id" ]] && type audit_log_change &>/dev/null; then
+        audit_log_change "stock_update" "$sku" "${current_stock_for_audit:-unknown}" "$new_quantity" "$batch_id" "pending"
+    fi
+    
     log_debug "update_stock called with sku=$sku quantity=$new_quantity warehouse=$warehouse_id mock=$mock_mode"
     
     # Mock режим
     if [[ "$mock_mode" == "true" ]]; then
+        # Audit: mark success
+        if [[ -n "$batch_id" ]] && type audit_update_status &>/dev/null; then
+            audit_update_status "$batch_id" "$sku" "success"
+        fi
         cat <<EOF
 {
   "result": [
@@ -199,7 +233,21 @@ EOF
 EOF
 )
     
-    ozon_request "POST" "/v1/product/import/stocks" "$request_data"
+    local response
+    response=$(ozon_request "POST" "/v1/product/import/stocks" "$request_data")
+    local result=$?
+    
+    # Audit: обновить статус
+    if [[ -n "$batch_id" ]] && type audit_update_status &>/dev/null; then
+        if [[ $result -eq 0 ]]; then
+            audit_update_status "$batch_id" "$sku" "success"
+        else
+            audit_update_status "$batch_id" "$sku" "fail"
+        fi
+    fi
+    
+    echo "$response"
+    return $result
 }
 
 # Получить остаток конкретного товара
