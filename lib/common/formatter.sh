@@ -53,14 +53,12 @@ format_order_status() {
 format_price() {
     local json=$1
     
-    echo "$json" | jq -r '
-        .result.items[0] | 
-        "SKU: \(.offer_id)\n" +
-        "💰 Текущая цена: \(.price.price) ₽\n" +
-        "🏷️  Старая цена: \(.price.old_price // \"не указана\") ₽\n" +
-        "📉 Мин. цена: \(.price.min_price // \"не указана\") ₽\n" +
-        "💳 Цена с картой: \(.price.premium_price // \"не указана\") ₽"
-    '
+    echo "$json" | jq -r '.result.items[0] | 
+"SKU: \(.offer_id)
+💰 Текущая цена: \(.price.price) ₽
+🏷️  Старая цена: \(.price.old_price // "не указана") ₽
+📉 Мин. цена: \(.price.min_price // "не указана") ₽
+💳 Цена с картой: \(.price.premium_price // "не указана") ₽"'
 }
 
 # Форматировать список остатков
@@ -146,7 +144,8 @@ calculate_change_percent() {
         return
     fi
     
-    local change=$(echo "scale=2; (($new - $old) / $old) * 100" | bc 2>/dev/null)
+    # Использовать awk вместо bc
+    local change=$(awk -v old="$old" -v new="$new" 'BEGIN {printf "%.2f", ((new - old) / old) * 100}' 2>/dev/null)
     
     if [[ -z "$change" ]]; then
         echo "N/A"
@@ -154,7 +153,7 @@ calculate_change_percent() {
     fi
     
     # Добавить знак + для положительных значений
-    if (( $(echo "$change > 0" | bc -l 2>/dev/null || echo 0) )); then
+    if (( $(awk -v val="$change" 'BEGIN {print (val > 0)}') )); then
         echo "+${change}%"
     else
         echo "${change}%"

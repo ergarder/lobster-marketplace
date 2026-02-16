@@ -1,0 +1,338 @@
+#!/bin/bash
+# CLI для управления ценами товаров Ozon
+
+set -e
+
+# Определить директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
+
+# Загрузить модули
+source "${LIB_DIR}/common/logger.sh"
+source "${LIB_DIR}/ozon/auth.sh"
+source "${LIB_DIR}/common/http.sh"
+source "${LIB_DIR}/common/formatter.sh"
+source "${LIB_DIR}/ozon/prices.sh"
+
+# Цвета для вывода
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+# Показать help
+show_help() {
+    cat <<EOF
+Использование: mp-prices <команда> [опции]
+
+Команды:
+  get <sku>                    Получить текущую цену товара
+  update <sku> <price>         Обновить цену товара
+  list                         Показать цены всех товаров
+
+Опции:
+  --mock                       Использовать mock данные (для тестирования без API)
+  --old-price <price>          Установить старую цену (зачёркнутую) при обновлении
+  --yes                        Подтвердить обновление без prompt (осторожно!)
+
+Примеры:
+  mp-prices get TWS-PRO-001                    # Получить цену товара
+  mp-prices get TWS-PRO-001 --mock             # Тестирование с mock данными
+  mp-prices update TWS-PRO-001 2500            # Обновить цену → 2500 ₽
+  mp-prices update TWS-PRO-001 2500 --old-price 2999  # С зачёркнутой ценой
+  mp-prices list                               # Показать все цены
+
+⚠️  ВНИМАНИЕ: Обновление цен влияет на продажи! Всегда проверяйте изменения перед подтверждением.
+
+EOF
+}
+
+# Команда: get - получить цену товара
+cmd_get() {
+    local sku=$1
+    shift
+    
+    if [[ -z "$sku" ]]; then
+        echo "ERROR: Укажите SKU товара" >&2
+        echo "" >&2
+        echo "Использование: mp-prices get <sku> [--mock]" >&2
+        echo "" >&2
+        exit 1
+    fi
+    
+    local args=("$sku")
+    local is_mock=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mock)
+                args+=("--mock")
+                is_mock=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Загрузить credentials если не mock режим
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}💰 Цена товара${NC}"
+    echo ""
+    
+    # Получить цену
+    local price_json=$(get_price "${args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить цену${NC}" >&2
+        exit 1
+    fi
+    
+    # Проверить что товар найден
+    local count=$(echo "$price_json" | jq -r '.result.items | length')
+    if [[ "$count" == "0" ]]; then
+        echo "Товар с SKU \"$sku\" не найден"
+        exit 1
+    fi
+    
+    # Форматировать и вывести
+    format_price "$price_json"
+    
+    echo ""
+}
+
+# Команда: update - обновить цену товара
+cmd_update() {
+    local sku=$1
+    local new_price=$2
+    shift 2
+    
+    if [[ -z "$sku" ]] || [[ -z "$new_price" ]]; then
+        echo "ERROR: Укажите SKU и новую цену" >&2
+        echo "" >&2
+        echo "Использование: mp-prices update <sku> <price> [--mock] [--old-price <price>] [--yes]" >&2
+        echo "" >&2
+        exit 1
+    fi
+    
+    local is_mock=false
+    local old_price_arg=""
+    local auto_confirm=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mock)
+                is_mock=true
+                shift
+                ;;
+            --old-price)
+                old_price_arg="--old-price $2"
+                shift 2
+                ;;
+            --yes)
+                auto_confirm=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Загрузить credentials если не mock режим
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}💰 Обновление цены товара${NC}"
+    echo ""
+    
+    # Получить текущую цену
+    local get_args=("$sku")
+    [[ "$is_mock" == "true" ]] && get_args+=("--mock")
+    
+    local current_price_json=$(get_price "${get_args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить текущую цену${NC}" >&2
+        exit 1
+    fi
+    
+    # Извлечь текущую цену
+    local old_price=$(echo "$current_price_json" | jq -r '.result.items[0].price.price')
+    
+    if [[ -z "$old_price" ]] || [[ "$old_price" == "null" ]]; then
+        echo -e "${YELLOW}WARNING: Не удалось получить текущую цену. Продолжаем...${NC}"
+        old_price="0"
+    fi
+    
+    # Валидация изменения цены
+    if [[ "$old_price" != "0" ]]; then
+        if ! validate_price_change "$old_price" "$new_price"; then
+            echo ""
+            read -p "Продолжить несмотря на большое изменение? (y/N): " force_update
+            if [[ ! "$force_update" =~ ^[Yy]$ ]]; then
+                echo "Отменено"
+                exit 0
+            fi
+        fi
+    fi
+    
+    # Вычислить процент изменения
+    local change_percent=$(calculate_change_percent "$old_price" "$new_price")
+    
+    # Показать изменение и запросить подтверждение
+    echo "SKU: $sku"
+    echo ""
+    echo "Старая цена: $old_price ₽"
+    echo "Новая цена:  $new_price ₽"
+    echo "Изменение:   $change_percent"
+    echo ""
+    
+    if [[ "$auto_confirm" == "false" ]]; then
+        echo -e "${YELLOW}⚠️  Это действие изменит цену товара на площадке!${NC}"
+        echo ""
+        read -p "Подтвердите обновление цены (y/N): " confirm
+        
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Отменено"
+            exit 0
+        fi
+    fi
+    
+    echo ""
+    echo "🔄 Обновление цены..."
+    
+    # Выполнить обновление
+    local update_args=("$sku" "$new_price")
+    [[ "$is_mock" == "true" ]] && update_args+=("--mock")
+    [[ -n "$old_price_arg" ]] && update_args+=($old_price_arg)
+    
+    local update_json=$(update_price "${update_args[@]}")
+    result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo ""
+        echo -e "${RED}ERROR: Не удалось обновить цену${NC}" >&2
+        exit 1
+    fi
+    
+    # Проверить результат
+    local updated=$(echo "$update_json" | jq -r '.result[0].updated // false')
+    local errors=$(echo "$update_json" | jq -r '.result[0].errors // [] | length')
+    
+    if [[ "$updated" == "true" ]] && [[ "$errors" == "0" ]]; then
+        echo ""
+        echo -e "${GREEN}✅ Цена обновлена успешно!${NC}"
+        echo ""
+        log_info "Price updated: sku=$sku old=$old_price new=$new_price change=$change_percent"
+    else
+        echo ""
+        echo -e "${RED}❌ Ошибка обновления цены${NC}"
+        echo "$update_json" | jq -r '.result[0].errors[]' 2>/dev/null || echo "Неизвестная ошибка"
+        exit 1
+    fi
+}
+
+# Команда: list - показать все цены
+cmd_list() {
+    local args=()
+    local is_mock=false
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mock)
+                args+=("--mock")
+                is_mock=true
+                shift
+                ;;
+            --limit)
+                args+=("--limit" "$2")
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Загрузить credentials если не mock режим
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}💰 Цены товаров${NC}"
+    echo ""
+    
+    # Получить цены
+    local prices_json=$(get_prices_bulk "${args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить цены${NC}" >&2
+        exit 1
+    fi
+    
+    # Форматировать вывод
+    local count=$(echo "$prices_json" | jq -r '.result.items | length')
+    
+    if [[ "$count" == "0" ]]; then
+        echo "Нет товаров с ценами"
+        exit 0
+    fi
+    
+    echo "Найдено товаров: $count"
+    echo ""
+    
+    echo "$prices_json" | jq -r '.result.items[] | 
+"SKU: \(.offer_id)
+💰 Цена: \(.price.price) ₽" + 
+(if .price.old_price != "" then " (было: \(.price.old_price) ₽)" else "" end) + "
+---"'
+    
+    echo ""
+}
+
+# Main
+case "${1:-}" in
+    get)
+        shift
+        cmd_get "$@"
+        ;;
+    update)
+        shift
+        cmd_update "$@"
+        ;;
+    list)
+        shift
+        cmd_list "$@"
+        ;;
+    -h|--help|help)
+        show_help
+        ;;
+    "")
+        echo "ERROR: Команда не указана" >&2
+        echo "" >&2
+        show_help
+        exit 1
+        ;;
+    *)
+        echo "ERROR: Неизвестная команда: $1" >&2
+        echo "" >&2
+        show_help
+        exit 1
+        ;;
+esac
