@@ -352,7 +352,7 @@ cmd_rollback() {
         exit 1
     fi
     
-    rollback_batch "$batch_id" "stock" "$is_mock"
+    rollback_batch "$batch_id" "stock" "$is_mock" || true
 }
 
 # Команда: history - показать историю изменений
