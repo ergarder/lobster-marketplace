@@ -133,12 +133,40 @@ format_number() {
 
 # Вычислить процент изменения
 # Args: $1 - старая цена, $2 - новая цена
+# Test: calculate_change_percent 100 150 → "+50.00%"
+# Test: calculate_change_percent 100 50  → "-50.00%"
+# Test: calculate_change_percent 0 100   → "новый товар"
+# Test: calculate_change_percent "" 100   → "N/A"
+# Test: calculate_change_percent "abc" 100 → "N/A"
 calculate_change_percent() {
     local old=$1
     local new=$2
     
-    if [[ "$old" == "0" ]] || [[ -z "$old" ]]; then
+    # Защита от нечисловых значений
+    if [[ -z "$old" ]] || [[ -z "$new" ]]; then
         echo "N/A"
+        return
+    fi
+    
+    # Валидация: оба значения должны быть числами
+    if ! awk -v a="$old" 'BEGIN {exit (a+0 == a) ? 0 : 1}' 2>/dev/null; then
+        echo "N/A"
+        return
+    fi
+    if ! awk -v a="$new" 'BEGIN {exit (a+0 == a) ? 0 : 1}' 2>/dev/null; then
+        echo "N/A"
+        return
+    fi
+    
+    # Обработка old=0: новый товар
+    if (( $(awk -v old="$old" 'BEGIN {print (old == 0)}') )); then
+        if (( $(awk -v new="$new" 'BEGIN {print (new > 0)}') )); then
+            echo "новый товар"
+        elif (( $(awk -v new="$new" 'BEGIN {print (new == 0)}') )); then
+            echo "0.00%"
+        else
+            echo "N/A"
+        fi
         return
     fi
     
