@@ -230,6 +230,10 @@ rollback_batch() {
     echo ""
     echo "🔄 Выполняется rollback..."
     
+    # Suppress interactive prompts inside update functions —
+    # rollback already has its own confirmation above.
+    export AUTO_CONFIRM_ZERO=true
+    
     while IFS='|' read -r timestamp user bid action sku old_value new_value status; do
         local rollback_action="rollback_${action%%_*}"
         
@@ -241,12 +245,12 @@ rollback_batch() {
         if [[ "$action" == "price_update" ]]; then
             local update_args=("$sku" "$old_value")
             [[ "$mock_mode" == "true" ]] && update_args+=("--mock")
-            update_price "${update_args[@]}" > /dev/null 2>&1
+            update_price "${update_args[@]}" < /dev/null > /dev/null 2>&1
             result=$?
         elif [[ "$action" == "stock_update" ]]; then
             local update_args=("$sku" "$old_value")
             [[ "$mock_mode" == "true" ]] && update_args+=("--mock")
-            update_stock "${update_args[@]}" > /dev/null 2>&1
+            update_stock "${update_args[@]}" < /dev/null > /dev/null 2>&1
             result=$?
         fi
         
@@ -267,6 +271,8 @@ rollback_batch() {
             return 1
         fi
     done <<< "$batch_records"
+    
+    unset AUTO_CONFIRM_ZERO
     
     echo ""
     echo "✅ Rollback завершён: $success_count позиций откачено"
