@@ -33,22 +33,19 @@ format_orders() {
 format_order_status() {
     local json=$1
     
-    echo "$json" | jq -r '
-        .result | 
-        "Заказ №\(.posting_number)\n" +
-        "📊 Статус: \(.status)\n" +
-        "📅 Создан: \(.in_process_at)\n" +
-        "⏰ Отгрузка до: \(.shipment_date)\n" +
-        "🏢 Склад: \(.warehouse_name // \"не указан\")\n" +
-        "\nТовары:\n" +
-        (
-            .products[] | 
-            "  • \(.name)\n" +
-            "    SKU: \(.sku)\n" +
-            "    Кол-во: \(.quantity) шт\n" +
-            "    Цена: \(.price) ₽\n"
-        )
-    '
+    echo "$json" | jq -r '.result | 
+"Заказ №\(.posting_number)
+📊 Статус: \(.status)
+📅 Создан: \(.in_process_at)
+⏰ Отгрузка до: \(.shipment_date)
+🏢 Склад: \(.warehouse_name // "не указан")
+
+Товары:" + 
+(.products[] | "
+  • \(.name)
+    SKU: \(.sku)
+    Кол-во: \(.quantity) шт
+    Цена: \(.price) ₽")'
 }
 
 # Форматировать цену товара

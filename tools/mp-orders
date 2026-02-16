@@ -1,0 +1,223 @@
+#!/bin/bash
+# CLI для управления заказами Ozon
+
+set -e
+
+# Определить директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
+
+# Загрузить модули
+source "${LIB_DIR}/common/logger.sh"
+source "${LIB_DIR}/ozon/auth.sh"
+source "${LIB_DIR}/common/http.sh"
+source "${LIB_DIR}/common/formatter.sh"
+source "${LIB_DIR}/ozon/orders.sh"
+
+# Цвета для вывода
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Показать help
+show_help() {
+    cat <<EOF
+Использование: mp-orders <команда> [опции]
+
+Команды:
+  list                  Показать новые/активные заказы
+  status <order_id>     Показать статус заказа
+  stats                 Показать статистику заказов
+
+Опции:
+  --mock                Использовать mock данные (для тестирования без API)
+  --status <status>     Фильтр по статусу (awaiting_packaging, delivering, delivered)
+  --limit <num>         Количество заказов (по умолчанию 50)
+
+Примеры:
+  mp-orders list                           # Показать новые заказы
+  mp-orders list --mock                    # Тестирование с mock данными
+  mp-orders list --status delivering       # Только заказы в доставке
+  mp-orders status 12345678-0001-1         # Статус конкретного заказа
+  mp-orders stats                          # Статистика
+
+EOF
+}
+
+# Команда: list - показать заказы
+cmd_list() {
+    local args=()
+    
+    # Передать все аргументы в get_orders
+    while [[ $# -gt 0 ]]; do
+        args+=("$1")
+        shift
+    done
+    
+    # Загрузить credentials если не mock режим
+    local is_mock=false
+    for arg in "${args[@]}"; do
+        [[ "$arg" == "--mock" ]] && is_mock=true
+    done
+    
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}📦 Заказы Ozon${NC}"
+    echo ""
+    
+    # Получить заказы
+    local orders_json=$(get_orders "${args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить заказы${NC}" >&2
+        exit 1
+    fi
+    
+    # Форматировать и вывести
+    format_orders "$orders_json"
+    
+    echo ""
+}
+
+# Команда: status - показать статус заказа
+cmd_status() {
+    local posting_number=$1
+    shift
+    
+    if [[ -z "$posting_number" ]]; then
+        echo "ERROR: Укажите posting_number" >&2
+        echo "" >&2
+        echo "Использование: mp-orders status <posting_number> [--mock]" >&2
+        echo "" >&2
+        exit 1
+    fi
+    
+    local args=("$posting_number")
+    
+    # Парсинг дополнительных аргументов
+    local is_mock=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mock)
+                args+=("--mock")
+                is_mock=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Загрузить credentials если не mock режим
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}📋 Статус заказа${NC}"
+    echo ""
+    
+    # Получить статус
+    local status_json=$(get_order_status "${args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить статус заказа${NC}" >&2
+        exit 1
+    fi
+    
+    # Форматировать и вывести
+    format_order_status "$status_json"
+    
+    echo ""
+}
+
+# Команда: stats - показать статистику
+cmd_stats() {
+    local args=()
+    
+    # Парсинг аргументов
+    local is_mock=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --mock)
+                args+=("--mock")
+                is_mock=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    # Загрузить credentials если не mock режим
+    if [[ "$is_mock" == "false" ]]; then
+        load_credentials
+        check_ozon_credentials || exit 1
+    fi
+    
+    echo ""
+    echo -e "${BLUE}📊 Статистика заказов${NC}"
+    echo ""
+    
+    # Получить статистику
+    local stats_json=$(get_orders_stats "${args[@]}")
+    local result=$?
+    
+    if [[ $result -ne 0 ]]; then
+        echo -e "${RED}ERROR: Не удалось получить статистику${NC}" >&2
+        exit 1
+    fi
+    
+    # Форматировать вывод
+    local total=$(echo "$stats_json" | jq -r '.total')
+    local awaiting=$(echo "$stats_json" | jq -r '.by_status.awaiting_packaging')
+    local delivering=$(echo "$stats_json" | jq -r '.by_status.delivering')
+    
+    echo "Всего заказов: $total"
+    echo ""
+    echo "По статусам:"
+    echo "  ⏳ Ожидают сборки: $awaiting"
+    echo "  🚚 В доставке: $delivering"
+    echo ""
+}
+
+# Main
+case "${1:-}" in
+    list)
+        shift
+        cmd_list "$@"
+        ;;
+    status)
+        shift
+        cmd_status "$@"
+        ;;
+    stats)
+        shift
+        cmd_stats "$@"
+        ;;
+    -h|--help|help)
+        show_help
+        ;;
+    "")
+        echo "ERROR: Команда не указана" >&2
+        echo "" >&2
+        show_help
+        exit 1
+        ;;
+    *)
+        echo "ERROR: Неизвестная команда: $1" >&2
+        echo "" >&2
+        show_help
+        exit 1
+        ;;
+esac
