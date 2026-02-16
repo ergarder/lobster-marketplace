@@ -1,0 +1,146 @@
+#!/bin/bash
+# Интерактивная настройка Ozon API credentials
+
+set -e
+
+# Определить директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
+
+# Загрузить модули
+source "${LIB_DIR}/common/logger.sh"
+source "${LIB_DIR}/ozon/auth.sh"
+
+# Цвета для вывода
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  🚀 Настройка Ozon Seller API для OpenClaw"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# Проверить существующие credentials
+if [[ -f "$CREDENTIALS_FILE" ]]; then
+    echo -e "${YELLOW}⚠️  Обнаружена существующая конфигурация${NC}"
+    echo ""
+    
+    load_credentials
+    echo "Client ID: $OZON_CLIENT_ID"
+    echo "API Key: ${OZON_API_KEY:0:10}***"
+    echo ""
+    
+    read -p "Перезаписать? (y/N): " overwrite
+    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+        echo "Отменено"
+        exit 0
+    fi
+    echo ""
+fi
+
+# Инструкция как получить ключи
+echo "📋 Как получить API ключи:"
+echo ""
+echo "1. Зайдите в личный кабинет Ozon Seller"
+echo "   https://seller.ozon.ru/"
+echo ""
+echo "2. Перейдите в раздел: Настройки → API ключи"
+echo ""
+echo "3. Создайте новый ключ:"
+echo "   • Название: OpenClaw Integration"
+echo "   • Права: Admin (полный доступ) или Content + Analytics"
+echo ""
+echo "4. Скопируйте Client-Id и Api-Key"
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# Ввод Client ID
+while true; do
+    read -p "Введите Client ID: " client_id
+    
+    # Валидация
+    if [[ -z "$client_id" ]]; then
+        echo -e "${RED}ERROR: Client ID не может быть пустым${NC}"
+        continue
+    fi
+    
+    if ! [[ "$client_id" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}ERROR: Client ID должен быть числом${NC}"
+        continue
+    fi
+    
+    break
+done
+
+# Ввод API Key
+while true; do
+    read -s -p "Введите API Key: " api_key
+    echo ""
+    
+    # Валидация
+    if [[ -z "$api_key" ]]; then
+        echo -e "${RED}ERROR: API Key не может быть пустым${NC}"
+        continue
+    fi
+    
+    if [[ ${#api_key} -lt 10 ]]; then
+        echo -e "${RED}ERROR: API Key слишком короткий${NC}"
+        continue
+    fi
+    
+    break
+done
+
+echo ""
+echo "─────────────────────────────────────────────────────────────"
+echo ""
+
+# Сохранить credentials
+if save_credentials "$client_id" "$api_key"; then
+    echo ""
+    echo "🔄 Проверка подключения к Ozon API..."
+    echo ""
+    
+    # Загрузить сохранённые credentials
+    export OZON_CLIENT_ID="$client_id"
+    export OZON_API_KEY="$api_key"
+    
+    # Source http.sh для проверки подключения
+    source "${LIB_DIR}/common/http.sh"
+    
+    # Проверить подключение
+    if test_ozon_connection; then
+        echo ""
+        echo -e "${GREEN}✅ Настройка завершена успешно!${NC}"
+        echo ""
+        echo "Доступные команды:"
+        echo "  mp-test          - проверить подключение"
+        echo "  mp-orders list   - показать заказы"
+        echo "  mp-prices        - управление ценами"
+        echo "  mp-stocks        - управление остатками"
+        echo ""
+        
+        log_info "Ozon API setup completed successfully"
+        exit 0
+    else
+        echo ""
+        echo -e "${RED}❌ Не удалось подключиться к Ozon API${NC}"
+        echo ""
+        echo "Credentials сохранены, но подключение не удалось."
+        echo "Проверьте правильность Client ID и API Key."
+        echo ""
+        echo "Для повторной настройки запустите: mp-setup"
+        
+        log_error "Ozon API setup failed - connection test failed"
+        exit 1
+    fi
+else
+    echo ""
+    echo -e "${RED}❌ Ошибка сохранения credentials${NC}"
+    log_error "Failed to save credentials"
+    exit 1
+fi

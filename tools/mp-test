@@ -1,0 +1,73 @@
+#!/bin/bash
+# Проверка подключения к Ozon API
+
+set -e
+
+# Определить директорию скрипта
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
+
+# Загрузить модули
+source "${LIB_DIR}/common/logger.sh"
+source "${LIB_DIR}/ozon/auth.sh"
+source "${LIB_DIR}/common/http.sh"
+
+# Цвета для вывода
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+echo ""
+echo "═══════════════════════════════════════════════════════════════"
+echo "  🔍 Проверка подключения к Ozon Seller API"
+echo "═══════════════════════════════════════════════════════════════"
+echo ""
+
+# Проверить наличие credentials файла
+if [[ ! -f "$CREDENTIALS_FILE" ]]; then
+    echo -e "${RED}❌ Credentials не настроены${NC}"
+    echo ""
+    echo "Для настройки выполните: mp-setup"
+    echo ""
+    exit 1
+fi
+
+# Загрузить credentials
+load_credentials
+
+# Показать текущую конфигурацию
+echo -e "${BLUE}📋 Конфигурация:${NC}"
+echo "  Client ID: $OZON_CLIENT_ID"
+echo "  API Key: ${OZON_API_KEY:0:10}***"
+echo "  Режим: ${MODE:-production}"
+echo ""
+
+# Проверить подключение
+if test_ozon_connection; then
+    echo ""
+    echo "─────────────────────────────────────────────────────────────"
+    echo ""
+    echo -e "${GREEN}✅ Все проверки пройдены успешно!${NC}"
+    echo ""
+    echo "Доступные команды:"
+    echo "  mp-orders list      - показать новые заказы"
+    echo "  mp-prices get SKU   - получить цену товара"
+    echo "  mp-stocks list      - показать остатки"
+    echo ""
+    exit 0
+else
+    echo ""
+    echo "─────────────────────────────────────────────────────────────"
+    echo ""
+    echo -e "${RED}❌ Проверка подключения не удалась${NC}"
+    echo ""
+    echo "Рекомендации:"
+    echo "  1. Проверьте правильность Client ID и API Key"
+    echo "  2. Убедитесь что API ключ имеет нужные права"
+    echo "  3. Проверьте подключение к интернету"
+    echo ""
+    echo "Для повторной настройки: mp-setup"
+    echo ""
+    exit 1
+fi
