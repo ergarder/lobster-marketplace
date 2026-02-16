@@ -1,0 +1,29 @@
+# Credentials и секретные данные
+credentials.env
+config/credentials.env
+*.env
+!*.env.example
+
+# Логи
+logs/
+*.log
+
+# Временные файлы
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Testing
+test-results/
+coverage/
+
+# Backup files
+*.bak
+*.backup
