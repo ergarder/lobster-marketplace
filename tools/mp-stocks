@@ -84,7 +84,7 @@ _format_stocks() {
         wb)
             if [[ "$show_low" == "true" ]]; then
                 json=$(echo "$json" | jq --argjson t "$threshold" '
-                    if .stocks then {stocks: [.stocks[] | select((.stock // .quantity // 0) < $t)]}
+                    if .stocks then {stocks: [.stocks[] | select((.amount // .stock // .quantity // 0) < $t)]}
                     else . end')
             fi
             format_wb_stocks "$json"

@@ -155,17 +155,19 @@ audit_get_by_sku() {
 #   $1 - ACTION фильтр (опционально, например "price_update")
 audit_get_last_batch_id() {
     local action_filter="${1:-}"
+    local platform_filter="${2:-${CURRENT_PLATFORM:-}}"
     local user="${USER:-$(whoami)}"
     
     if [[ ! -f "$AUDIT_LOG" ]]; then
         return 1
     fi
     
-    if [[ -n "$action_filter" ]]; then
-        grep "|${user}|" "$AUDIT_LOG" | grep "|${action_filter}|" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
-    else
-        grep "|${user}|" "$AUDIT_LOG" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
-    fi
+    local cmd="grep \"|${user}|\" \"$AUDIT_LOG\""
+    [[ -n "$action_filter" ]] && cmd="$cmd | grep \"|${action_filter}|\""
+    # Filter by platform (field 3 in 9-field format) to prevent cross-platform rollback
+    [[ -n "$platform_filter" ]] && cmd="$cmd | grep \"|${platform_filter}|\""
+    
+    eval "$cmd" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
 }
 
 # Rollback batch операции

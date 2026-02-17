@@ -2,6 +2,12 @@
 # Wildberries HTTP клиент
 # Особенности: multiple base URLs, Authorization header, 409=10x penalty
 
+# Require bash 4+ for associative arrays (declare -A)
+if (( BASH_VERSINFO[0] < 4 )); then
+    echo "ERROR: lib/wb/http.sh requires bash 4+ (found ${BASH_VERSION}). Associative arrays not supported." >&2
+    return 1 2>/dev/null || exit 1
+fi
+
 # Base URLs per API category
 declare -A WB_API_HOSTS=(
     [content]="content-api.wildberries.ru"

@@ -11,6 +11,9 @@ YM_BASE_URL="https://api.partner.market.yandex.ru"
 #   $3 - JSON данные (опционально)
 #   $4 - id_type: "business" or "campaign" (для подстановки в path)
 #   $5 - id_value (опционально, берётся из env если пусто)
+# LIMITATION: Only one id_type can be used per call. Endpoints requiring both
+# businessId and campaignId in the same path are not supported — caller must
+# do manual substitution before calling this function.
 ymarket_request() {
     local method=$1
     local endpoint=$2

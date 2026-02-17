@@ -102,7 +102,15 @@ MOCK_EOF
     local wh_id=$(_wb_resolve_warehouse "$warehouse_id" "$mock_mode")
     [[ $? -ne 0 ]] && return 1
 
-    wb_request "POST" "/api/v3/stocks/${wh_id}" '{"skus":["*"]}' "marketplace"
+    # NOTE: {"skus":["*"]} wildcard is undocumented/unverified in WB API.
+    # If WB changes this behavior, the response may be empty or an error.
+    local response
+    response=$(wb_request "POST" "/api/v3/stocks/${wh_id}" '{"skus":["*"]}' "marketplace")
+    if [[ $? -ne 0 ]] || [[ -z "$response" ]] || echo "$response" | jq -e '.stocks // .error // empty' &>/dev/null && [[ "$(echo "$response" | jq -r '.error // empty')" != "" ]]; then
+        echo "WARNING: wb_get_stocks: ответ пустой или содержит ошибку. Wildcard {\"skus\":[\"*\"]} может не поддерживаться." >&2
+        [[ -z "$response" ]] && return 1
+    fi
+    echo "$response"
 }
 
 wb_update_stocks() {

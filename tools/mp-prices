@@ -167,7 +167,7 @@ cmd_update() {
 
     # Validate change
     if [[ "$old_price" != "0" ]]; then
-        if ! validate_price_change "$old_price" "$display_price" 2>/dev/null; then
+        if type validate_price_change &>/dev/null && ! validate_price_change "$old_price" "$display_price" 2>/dev/null; then
             if [[ "$auto_confirm" == "true" ]] && [[ "$force_mode" == "false" ]]; then
                 echo -e "${RED}ERROR: --yes запрещён для изменений >50%${NC}" >&2
                 exit 1
