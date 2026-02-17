@@ -288,8 +288,10 @@ cmd_confirm_quarantine() {
     echo "$q_json" | jq -r '.result.quarantineOffers[] | "  SKU: \(.offerId) — \(.currentPrice.value) → \(.newPrice.value) ₽"'
     echo ""
 
-    read -p "Подтвердить все карантинные цены? (y/N): " confirm
-    [[ ! "$confirm" =~ ^[Yy]$ ]] && echo "Отменено" && return 0
+    if [[ "$is_mock" == "false" ]]; then
+        read -p "Подтвердить все карантинные цены? (y/N): " confirm
+        [[ ! "$confirm" =~ ^[Yy]$ ]] && echo "Отменено" && return 0
+    fi
 
     local confirm_json=$(ym_confirm_quarantine "${args[@]}")
     echo -e "${GREEN}✅ Карантинные цены подтверждены${NC}"
