@@ -55,6 +55,8 @@ log_message() {
     # Маскировать чувствительные данные
     log_entry=$(echo "$log_entry" | sed -E 's/(Api-Key|API_KEY|OZON_API_KEY): [^ ]+/\1: ***MASKED***/g')
     log_entry=$(echo "$log_entry" | sed -E 's/(Client-Id|CLIENT_ID|OZON_CLIENT_ID): [0-9]+/\1: ***MASKED***/g')
+    log_entry=$(echo "$log_entry" | sed -E 's/(Authorization): [^ ]+/\1: ***MASKED***/g')
+    log_entry=$(echo "$log_entry" | sed -E 's/(WB_API_TOKEN|YM_API_KEY)[=: ]*[^ ]+/\1=***MASKED***/g')
     
     echo "$log_entry" >> "$LOG_FILE"
 }

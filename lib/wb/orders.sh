@@ -113,6 +113,7 @@ wb_get_order_status() {
     done
 
     [[ -z "$order_id" ]] && echo "ERROR: ID заказа обязателен" >&2 && return 1
+    [[ ! "$order_id" =~ ^[0-9]+$ ]] && echo "ERROR: ID заказа должен быть числом" >&2 && return 1
 
     if [[ "$mock_mode" == "true" ]]; then
         cat <<EOF

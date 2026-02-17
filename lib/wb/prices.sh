@@ -13,7 +13,7 @@ wb_get_prices() {
             --mock) mock_mode=true; shift ;;
             --limit) limit="$2"; shift 2 ;;
             --offset) offset="$2"; shift 2 ;;
-            *) [[ -z "$sku" ]]; sku="$1"; shift ;;
+            *) [[ -z "$sku" ]] && sku="$1"; shift ;;
         esac
     done
 
@@ -72,6 +72,7 @@ MOCK_EOF
     fi
 
     local params="limit=${limit}&offset=${offset}"
+    [[ -n "$sku" ]] && params="${params}&filterNmID=${sku}"
     wb_request "GET" "/api/v2/list/goods/filter?${params}" "{}" "prices"
 }
 
@@ -94,6 +95,7 @@ wb_update_price() {
     done
 
     [[ -z "$sku" ]] || [[ -z "$new_price_kopecks" ]] && echo "ERROR: SKU и цена обязательны" >&2 && return 1
+    [[ ! "$sku" =~ ^[0-9]+$ ]] && echo "ERROR: WB nmID должен быть числом, получено: $sku" >&2 && return 1
 
     # Audit
     if [[ -n "$batch_id" ]] && type audit_log_change &>/dev/null; then

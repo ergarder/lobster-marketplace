@@ -76,10 +76,27 @@ _update_stock() {
 }
 
 _format_stocks() {
+    local json="$1"
+    local show_low="${2:-false}"
+    local threshold="${3:-10}"
     case "$CURRENT_PLATFORM" in
-        ozon)    format_stocks "$1" "${2:-false}" ;;
-        wb)      format_wb_stocks "$1" ;;
-        ymarket) format_ym_stocks "$1" ;;
+        ozon)    format_stocks "$json" "$show_low" ;;
+        wb)
+            if [[ "$show_low" == "true" ]]; then
+                json=$(echo "$json" | jq --argjson t "$threshold" '
+                    if .stocks then {stocks: [.stocks[] | select((.stock // .quantity // 0) < $t)]}
+                    else . end')
+            fi
+            format_wb_stocks "$json"
+            ;;
+        ymarket)
+            if [[ "$show_low" == "true" ]]; then
+                json=$(echo "$json" | jq --argjson t "$threshold" '
+                    if .warehouses then {warehouses: [.warehouses[] | {warehouseId, offers: [.offers[] | select((.stocks[0].count // 0) < $t)]}]}
+                    else . end')
+            fi
+            format_ym_stocks "$json"
+            ;;
     esac
 }
 
@@ -87,12 +104,14 @@ cmd_list() {
     local args=()
     local show_low=false
     local is_mock=false
+    local threshold=10
 
     while [[ $# -gt 0 ]]; do
         case $1 in
             --mock) args+=("--mock"); is_mock=true; shift ;;
             --low) show_low=true; shift ;;
-            --threshold|--warehouse|--limit) args+=("$1" "$2"); shift 2 ;;
+            --threshold) threshold="$2"; args+=("$1" "$2"); shift 2 ;;
+            --warehouse|--limit) args+=("$1" "$2"); shift 2 ;;
             *) shift ;;
         esac
     done
@@ -112,7 +131,7 @@ cmd_list() {
 
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2 && exit 1
 
-    _format_stocks "$stocks_json" "$show_low"
+    _format_stocks "$stocks_json" "$show_low" "$threshold"
     echo ""
 }
 
@@ -138,8 +157,8 @@ cmd_get() {
 
     echo "$stock_data" | jq -r '
 "SKU: \(.sku // .offerId // .offer_id // "N/A")
-📦 Остаток: \(.stock // .amount // .count // 0) шт" +
-(if (.stock // .amount // .count // 999) < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end)'
+📦 Остаток: \(.stock // .amount // .stocks[0].count // .count // 0) шт" +
+(if (.stock // .amount // .stocks[0].count // .count // 999) < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end)'
     echo ""
 }
 

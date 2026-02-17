@@ -37,7 +37,9 @@ _audit_mask_sensitive() {
     local text="$1"
     echo "$text" | sed -E \
         -e 's/(Api-Key|API_KEY|OZON_API_KEY)[=: ]*[^ |]+/\1=***MASKED***/g' \
-        -e 's/(Client-Id|CLIENT_ID|OZON_CLIENT_ID)[=: ]*[0-9]+/\1=***MASKED***/g'
+        -e 's/(Client-Id|CLIENT_ID|OZON_CLIENT_ID)[=: ]*[0-9]+/\1=***MASKED***/g' \
+        -e 's/(Authorization)[=: ]*[^ |]+/\1=***MASKED***/g' \
+        -e 's/(WB_API_TOKEN|YM_API_KEY)[=: ]*[^ |]+/\1=***MASKED***/g'
 }
 
 # Записать одно изменение в audit log
@@ -139,7 +141,7 @@ audit_get_by_sku() {
         return 1
     fi
     
-    local results=$(awk -F'|' -v s="$sku" '$5 == s' "$AUDIT_LOG" 2>/dev/null)
+    local results=$(awk -F'|' -v s="$sku" '(NF==9 && $6==s) || (NF==8 && $5==s)' "$AUDIT_LOG" 2>/dev/null)
     
     if [[ "$limit" -gt 0 ]]; then
         echo "$results" | tail -n "$limit"
@@ -160,9 +162,9 @@ audit_get_last_batch_id() {
     fi
     
     if [[ -n "$action_filter" ]]; then
-        grep "|${user}|" "$AUDIT_LOG" | grep "|${action_filter}|" | tail -1 | cut -d'|' -f3
+        grep "|${user}|" "$AUDIT_LOG" | grep "|${action_filter}|" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
     else
-        grep "|${user}|" "$AUDIT_LOG" | tail -1 | cut -d'|' -f3
+        grep "|${user}|" "$AUDIT_LOG" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
     fi
 }
 
@@ -201,10 +203,10 @@ rollback_batch() {
     fi
     
     # Проверить что все записи имеют статус success
-    local failed_records=$(echo "$batch_records" | awk -F'|' '$8 != "success"')
+    local failed_records=$(echo "$batch_records" | awk -F'|' 'NF==9 && $9 != "success" { print } NF==8 && $8 != "success" { print }')
     if [[ -n "$failed_records" ]]; then
         echo "ERROR: Не все записи в batch имеют статус success:" >&2
-        echo "$failed_records" | awk -F'|' '{printf "  SKU: %s, Status: %s\n", $5, $8}' >&2
+        echo "$failed_records" | awk -F'|' 'NF==9 {printf "  SKU: %s, Status: %s\n", $6, $9} NF==8 {printf "  SKU: %s, Status: %s\n", $5, $8}' >&2
         echo "Невозможно откатить batch с ошибками" >&2
         return 1
     fi
@@ -223,7 +225,7 @@ rollback_batch() {
     echo "   Записей для отката: $record_count"
     echo ""
     echo "   Будут выполнены следующие откаты:"
-    echo "$batch_records" | awk -F'|' '{printf "   SKU: %-20s  %s → %s (было: %s → %s)\n", $5, $7, $6, $6, $7}'
+    echo "$batch_records" | awk -F'|' 'NF==9 {printf "   SKU: %-20s  %s → %s (было: %s → %s)\n", $6, $8, $7, $7, $8} NF==8 {printf "   SKU: %-20s  %s → %s (было: %s → %s)\n", $5, $7, $6, $6, $7}'
     echo ""
     
     # Запросить подтверждение (ВСЕГДА, --yes не работает для rollback)
@@ -247,23 +249,45 @@ rollback_batch() {
     # rollback already has its own confirmation above.
     export AUTO_CONFIRM_ZERO=true
     
-    while IFS='|' read -r timestamp user bid action sku old_value new_value status; do
+    while IFS='|' read -r timestamp user platform bid action sku old_value new_value status; do
+        # Handle legacy 8-field format (no platform field)
+        if [[ -z "$status" ]]; then
+            # Shift fields: platform is actually bid, bid is action, etc.
+            status="$new_value"
+            new_value="$old_value"
+            old_value="$sku"
+            sku="$action"
+            action="$bid"
+            bid="$platform"
+            platform="ozon"
+        fi
+
         local rollback_action="rollback_${action%%_*}"
         
         # Логируем начало отката
         audit_log_change "$rollback_action" "$sku" "$new_value" "$old_value" "$rollback_batch_id" "pending"
         
-        # Выполняем обратную операцию
+        # Выполняем обратную операцию с диспетчеризацией по платформе
         local result=0
         if [[ "$action" == "price_update" ]]; then
             local update_args=("$sku" "$old_value")
             [[ "$mock_mode" == "true" ]] && update_args+=("--mock")
-            update_price "${update_args[@]}" < /dev/null > /dev/null 2>&1
+            case "$platform" in
+                ozon)    update_price "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+                wb)      wb_update_price "$sku" "$(rubles_to_kopecks "$old_value")" $([[ "$mock_mode" == "true" ]] && echo "--mock") < /dev/null > /dev/null 2>&1 ;;
+                ymarket) ym_update_prices "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+                *)       update_price "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+            esac
             result=$?
         elif [[ "$action" == "stock_update" ]]; then
             local update_args=("$sku" "$old_value")
             [[ "$mock_mode" == "true" ]] && update_args+=("--mock")
-            update_stock "${update_args[@]}" < /dev/null > /dev/null 2>&1
+            case "$platform" in
+                ozon)    update_stock "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+                wb)      wb_update_stocks "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+                ymarket) ym_update_stocks "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+                *)       update_stock "${update_args[@]}" < /dev/null > /dev/null 2>&1 ;;
+            esac
             result=$?
         fi
         

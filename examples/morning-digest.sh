@@ -76,7 +76,7 @@ echo "════════════════════════�
 
 if [[ "$PLATFORM" == "all" ]]; then
     for p in ozon wb ymarket; do
-        run_digest_for_platform "$p"
+        run_digest_for_platform "$p" || echo -e "${YELLOW}⚠️  $p: не настроен или ошибка, пропускаем${NC}"
     done
 else
     run_digest_for_platform "$PLATFORM"

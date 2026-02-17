@@ -13,11 +13,6 @@ declare -A WB_API_HOSTS=(
     [prices]="discounts-prices-api.wildberries.ru"
 )
 
-# Allow overrides from wb.env
-[[ -n "${WB_HOST_CONTENT:-}" ]] && WB_API_HOSTS[content]="$WB_HOST_CONTENT"
-[[ -n "${WB_HOST_MARKETPLACE:-}" ]] && WB_API_HOSTS[marketplace]="$WB_HOST_MARKETPLACE"
-[[ -n "${WB_HOST_PRICES:-}" ]] && WB_API_HOSTS[prices]="$WB_HOST_PRICES"
-
 # Выполнить HTTP запрос к WB API
 # Args:
 #   $1 - HTTP метод (GET, POST, PUT, PATCH, DELETE)
@@ -30,6 +25,11 @@ wb_request() {
     local data=${3:-"{}"}
     local category=${4:-marketplace}
     local attempt=1
+
+    # Apply host overrides from wb.env (loaded after http.sh is sourced)
+    [[ -n "${WB_HOST_CONTENT:-}" ]] && WB_API_HOSTS[content]="$WB_HOST_CONTENT"
+    [[ -n "${WB_HOST_MARKETPLACE:-}" ]] && WB_API_HOSTS[marketplace]="$WB_HOST_MARKETPLACE"
+    [[ -n "${WB_HOST_PRICES:-}" ]] && WB_API_HOSTS[prices]="$WB_HOST_PRICES"
 
     if [[ -z "$WB_API_TOKEN" ]]; then
         echo "ERROR: WB API токен не настроен. Запустите: mp-setup --platform wb" >&2
