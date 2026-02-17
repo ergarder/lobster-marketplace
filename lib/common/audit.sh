@@ -1,6 +1,7 @@
 #!/bin/bash
 # Structured audit log для marketplace операций
-# Формат: TIMESTAMP|USER|BATCH_ID|ACTION|SKU|OLD_VALUE|NEW_VALUE|STATUS
+# Формат: TIMESTAMP|USER|PLATFORM|BATCH_ID|ACTION|SKU|OLD_VALUE|NEW_VALUE|STATUS
+# Backward compat: 8-field lines (no platform) treated as ozon
 
 # Директория и файл audit лога
 AUDIT_DIR="${HOME}/.openclaw/marketplace"
@@ -62,7 +63,8 @@ audit_log_change() {
     old_value=$(_audit_mask_sensitive "$old_value")
     new_value=$(_audit_mask_sensitive "$new_value")
     
-    local entry="${timestamp}|${user}|${batch_id}|${action}|${sku}|${old_value}|${new_value}|${status}"
+    local platform="${CURRENT_PLATFORM:-ozon}"
+    local entry="${timestamp}|${user}|${platform}|${batch_id}|${action}|${sku}|${old_value}|${new_value}|${status}"
     
     # Atomic write с flock
     (
@@ -92,11 +94,22 @@ audit_update_status() {
         # Обновить ПОСЛЕДНЮЮ запись с данным batch_id + sku + status=pending
         # Читаем файл в обратном порядке, обновляем первую найденную, потом обратно
         tac "$AUDIT_LOG" | awk -F'|' -v bid="$batch_id" -v s="$sku" -v ns="$new_status" -v done=0 '{
-            if (done == 0 && $3 == bid && $5 == s && $8 == "pending") {
-                $8 = ns;
-                done = 1;
+            nf = split($0, f, "|");
+            if (nf == 9) {
+                # New format with platform
+                if (done == 0 && f[4] == bid && f[6] == s && f[9] == "pending") {
+                    f[9] = ns;
+                    done = 1;
+                }
+                print f[1]"|"f[2]"|"f[3]"|"f[4]"|"f[5]"|"f[6]"|"f[7]"|"f[8]"|"f[9]
+            } else {
+                # Legacy 8-field format
+                if (done == 0 && f[3] == bid && f[5] == s && f[8] == "pending") {
+                    f[8] = ns;
+                    done = 1;
+                }
+                print f[1]"|"f[2]"|"f[3]"|"f[4]"|"f[5]"|"f[6]"|"f[7]"|"f[8]
             }
-            print $1"|"$2"|"$3"|"$4"|"$5"|"$6"|"$7"|"$8
         }' | tac > "$tmp_file"
         mv "$tmp_file" "$AUDIT_LOG"
     ) 200>"$AUDIT_LOCK"
@@ -332,13 +345,17 @@ audit_show_history() {
     fi
     
     # Форматированный вывод
-    printf "%-19s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n" \
-        "TIMESTAMP" "USER" "BATCH_ID" "ACTION" "SKU" "OLD" "NEW" "STATUS"
-    echo "$(printf '%.0s-' {1..120})"
-    
-    echo "$records" | while IFS='|' read -r timestamp user batch_id action sku old_val new_val status; do
-        printf "%-19s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n" \
-            "$timestamp" "$user" "$batch_id" "$action" "$sku" "$old_val" "$new_val" "$status"
+    printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n" \
+        "TIMESTAMP" "USER" "PLATFORM" "BATCH_ID" "ACTION" "SKU" "OLD" "NEW" "STATUS"
+    echo "$(printf '%.0s-' {1..130})"
+
+    echo "$records" | while IFS='|' read -r line; do
+        local nf=$(echo "$line" | awk -F'|' '{print NF}')
+        if [[ "$nf" == "9" ]]; then
+            echo "$line" | awk -F'|' '{printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9}'
+        else
+            echo "$line" | awk -F'|' '{printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,"ozon",$3,$4,$5,$6,$7,$8}'
+        fi
     done
 }
 

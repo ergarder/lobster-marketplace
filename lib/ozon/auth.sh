@@ -2,7 +2,12 @@
 # Авторизация и проверка credentials для Ozon API
 
 CREDENTIALS_DIR="${HOME}/.openclaw/marketplace"
-CREDENTIALS_FILE="${CREDENTIALS_DIR}/credentials.env"
+OZON_CREDENTIALS_FILE="${CREDENTIALS_DIR}/ozon.env"
+# Backward compat: migrate old credentials.env → ozon.env
+if [[ -f "${CREDENTIALS_DIR}/credentials.env" ]] && [[ ! -f "$OZON_CREDENTIALS_FILE" ]]; then
+    cp "${CREDENTIALS_DIR}/credentials.env" "$OZON_CREDENTIALS_FILE" 2>/dev/null
+fi
+CREDENTIALS_FILE="${OZON_CREDENTIALS_FILE}"
 
 # Загрузить credentials из файла
 load_credentials() {

@@ -1,29 +1,29 @@
 #!/bin/bash
-# CLI для управления заказами Ozon
+# CLI для управления заказами (мульти-платформа)
 
 set -e
 
-# Определить директорию скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
 
-# Загрузить модули
-source "${LIB_DIR}/common/logger.sh"
-source "${LIB_DIR}/ozon/auth.sh"
-source "${LIB_DIR}/common/http.sh"
-source "${LIB_DIR}/common/formatter.sh"
-source "${LIB_DIR}/ozon/orders.sh"
+source "${LIB_DIR}/common/platform.sh"
 
-# Цвета для вывода
+resolve_platform "$@"
+set -- "${REMAINING_ARGS[@]}"
+
+source_platform_libs "$CURRENT_PLATFORM" orders
+
+PLATFORM_NAME=$(platform_display_name "$CURRENT_PLATFORM")
+
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-# Показать help
 show_help() {
     cat <<EOF
-Использование: mp-orders <команда> [опции]
+Использование: mp-orders [--platform ozon|wb|ymarket] <команда> [опции]
 
 Команды:
   list                  Показать новые/активные заказы
@@ -31,193 +31,173 @@ show_help() {
   stats                 Показать статистику заказов
 
 Опции:
-  --mock                Использовать mock данные (для тестирования без API)
-  --status <status>     Фильтр по статусу (awaiting_packaging, delivering, delivered)
-  --limit <num>         Количество заказов (по умолчанию 50)
-
-Примеры:
-  mp-orders list                           # Показать новые заказы
-  mp-orders list --mock                    # Тестирование с mock данными
-  mp-orders list --status delivering       # Только заказы в доставке
-  mp-orders status 12345678-0001-1         # Статус конкретного заказа
-  mp-orders stats                          # Статистика
+  --platform <name>     Платформа (ozon, wb, ymarket; по умолчанию ozon)
+  --mock                Использовать mock данные
+  --status <status>     Фильтр по статусу
+  --limit <num>         Количество заказов
 
 EOF
 }
 
-# Команда: list - показать заказы
+# Определить правильные функции для платформы
+_get_orders() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    get_orders "$@" ;;
+        wb)      wb_get_orders "$@" ;;
+        ymarket) ym_get_orders "$@" ;;
+    esac
+}
+
+_get_order_status() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    get_order_status "$@" ;;
+        wb)      wb_get_order_status "$@" ;;
+        ymarket) ym_get_order "$@" ;;
+    esac
+}
+
+_get_orders_stats() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    get_orders_stats "$@" ;;
+        wb)      wb_get_orders_stats "$@" ;;
+        ymarket) ym_get_orders_stats "$@" ;;
+    esac
+}
+
+_format_orders() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    format_orders "$1" ;;
+        wb)      format_wb_orders "$1" ;;
+        ymarket) format_ym_orders "$1" ;;
+    esac
+}
+
+_format_order_status() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    format_order_status "$1" ;;
+        wb)      format_wb_order_status "$1" ;;
+        ymarket) format_ym_order_status "$1" ;;
+    esac
+}
+
 cmd_list() {
     local args=()
-    
-    # Передать все аргументы в get_orders
+    local is_mock=false
+
     while [[ $# -gt 0 ]]; do
         args+=("$1")
+        [[ "$1" == "--mock" ]] && is_mock=true
         shift
     done
-    
-    # Загрузить credentials если не mock режим
-    local is_mock=false
-    for arg in "${args[@]}"; do
-        [[ "$arg" == "--mock" ]] && is_mock=true
-    done
-    
-    if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
-    fi
-    
-    echo ""
-    echo -e "${BLUE}📦 Заказы Ozon${NC}"
-    echo ""
-    
-    # Получить заказы
-    local orders_json=$(get_orders "${args[@]}")
-    local result=$?
-    
-    if [[ $result -ne 0 ]]; then
-        echo -e "${RED}ERROR: Не удалось получить заказы${NC}" >&2
-        exit 1
-    fi
-    
-    # Форматировать и вывести
-    format_orders "$orders_json"
-    
-    echo ""
-}
 
-# Команда: status - показать статус заказа
-cmd_status() {
-    local posting_number=$1
-    shift
-    
-    if [[ -z "$posting_number" ]]; then
-        echo "ERROR: Укажите posting_number" >&2
-        echo "" >&2
-        echo "Использование: mp-orders status <posting_number> [--mock]" >&2
-        echo "" >&2
-        exit 1
-    fi
-    
-    local args=("$posting_number")
-    
-    # Парсинг дополнительных аргументов
-    local is_mock=false
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            --mock)
-                args+=("--mock")
-                is_mock=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
+    if [[ "$is_mock" == "false" ]]; then
+        case "$CURRENT_PLATFORM" in
+            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
+            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
+            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
         esac
-    done
-    
-    # Загрузить credentials если не mock режим
-    if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
     fi
-    
+
     echo ""
-    echo -e "${BLUE}📋 Статус заказа${NC}"
+    echo -e "${BLUE}📦 Заказы ${PLATFORM_NAME}${NC}"
     echo ""
-    
-    # Получить статус
-    local status_json=$(get_order_status "${args[@]}")
-    local result=$?
-    
-    if [[ $result -ne 0 ]]; then
-        echo -e "${RED}ERROR: Не удалось получить статус заказа${NC}" >&2
-        exit 1
-    fi
-    
-    # Форматировать и вывести
-    format_order_status "$status_json"
-    
+
+    local orders_json=$(_get_orders "${args[@]}")
+    [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить заказы${NC}" >&2 && exit 1
+
+    _format_orders "$orders_json"
     echo ""
 }
 
-# Команда: stats - показать статистику
+cmd_status() {
+    local order_id=$1; shift
+    [[ -z "$order_id" ]] && echo "ERROR: Укажите ID заказа" >&2 && exit 1
+
+    local args=("$order_id")
+    local is_mock=false
+
+    while [[ $# -gt 0 ]]; do
+        [[ "$1" == "--mock" ]] && is_mock=true
+        args+=("$1"); shift
+    done
+
+    if [[ "$is_mock" == "false" ]]; then
+        case "$CURRENT_PLATFORM" in
+            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
+            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
+            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
+        esac
+    fi
+
+    echo ""
+    echo -e "${BLUE}📋 Статус заказа (${PLATFORM_NAME})${NC}"
+    echo ""
+
+    local status_json=$(_get_order_status "${args[@]}")
+    [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить статус${NC}" >&2 && exit 1
+
+    _format_order_status "$status_json"
+    echo ""
+}
+
 cmd_stats() {
     local args=()
-    
-    # Парсинг аргументов
     local is_mock=false
+
     while [[ $# -gt 0 ]]; do
-        case $1 in
-            --mock)
-                args+=("--mock")
-                is_mock=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
-        esac
+        [[ "$1" == "--mock" ]] && is_mock=true
+        args+=("$1"); shift
     done
-    
-    # Загрузить credentials если не mock режим
+
     if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
+        case "$CURRENT_PLATFORM" in
+            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
+            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
+            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
+        esac
     fi
-    
+
     echo ""
-    echo -e "${BLUE}📊 Статистика заказов${NC}"
+    echo -e "${BLUE}📊 Статистика заказов (${PLATFORM_NAME})${NC}"
     echo ""
-    
-    # Получить статистику
-    local stats_json=$(get_orders_stats "${args[@]}")
-    local result=$?
-    
-    if [[ $result -ne 0 ]]; then
-        echo -e "${RED}ERROR: Не удалось получить статистику${NC}" >&2
-        exit 1
-    fi
-    
-    # Форматировать вывод
-    local total=$(echo "$stats_json" | jq -r '.total')
-    local awaiting=$(echo "$stats_json" | jq -r '.by_status.awaiting_packaging')
-    local delivering=$(echo "$stats_json" | jq -r '.by_status.delivering')
-    
-    echo "Всего заказов: $total"
-    echo ""
-    echo "По статусам:"
-    echo "  ⏳ Ожидают сборки: $awaiting"
-    echo "  🚚 В доставке: $delivering"
+
+    local stats_json=$(_get_orders_stats "${args[@]}")
+    [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить статистику${NC}" >&2 && exit 1
+
+    case "$CURRENT_PLATFORM" in
+        ozon)
+            local total=$(echo "$stats_json" | jq -r '.total')
+            local awaiting=$(echo "$stats_json" | jq -r '.by_status.awaiting_packaging')
+            local delivering=$(echo "$stats_json" | jq -r '.by_status.delivering')
+            echo "Всего заказов: $total"
+            echo "  ⏳ Ожидают сборки: $awaiting"
+            echo "  🚚 В доставке: $delivering"
+            ;;
+        wb)
+            local total=$(echo "$stats_json" | jq -r '.total')
+            local new_count=$(echo "$stats_json" | jq -r '.by_status.new // 0')
+            local confirm=$(echo "$stats_json" | jq -r '.by_status.confirm // 0')
+            echo "Всего заказов: $total"
+            echo "  🆕 Новые: $new_count"
+            echo "  ✅ Подтверждённые: $confirm"
+            ;;
+        ymarket)
+            local total=$(echo "$stats_json" | jq -r '.total')
+            local processing=$(echo "$stats_json" | jq -r '.by_status.PROCESSING // 0')
+            local delivery=$(echo "$stats_json" | jq -r '.by_status.DELIVERY // 0')
+            echo "Всего заказов: $total"
+            echo "  📦 В обработке: $processing"
+            echo "  🚚 В доставке: $delivery"
+            ;;
+    esac
     echo ""
 }
 
-# Main
 case "${1:-}" in
-    list)
-        shift
-        cmd_list "$@"
-        ;;
-    status)
-        shift
-        cmd_status "$@"
-        ;;
-    stats)
-        shift
-        cmd_stats "$@"
-        ;;
-    -h|--help|help)
-        show_help
-        ;;
-    "")
-        echo "ERROR: Команда не указана" >&2
-        echo "" >&2
-        show_help
-        exit 1
-        ;;
-    *)
-        echo "ERROR: Неизвестная команда: $1" >&2
-        echo "" >&2
-        show_help
-        exit 1
-        ;;
+    list)    shift; cmd_list "$@" ;;
+    status)  shift; cmd_status "$@" ;;
+    stats)   shift; cmd_stats "$@" ;;
+    -h|--help|help) show_help ;;
+    "")      echo "ERROR: Команда не указана" >&2; show_help; exit 1 ;;
+    *)       echo "ERROR: Неизвестная команда: $1" >&2; show_help; exit 1 ;;
 esac

@@ -1,400 +1,239 @@
 #!/bin/bash
-# CLI для управления остатками товаров Ozon
+# CLI для управления остатками (мульти-платформа)
 
 set -e
 
-# Определить директорию скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
 
-# Загрузить модули
-source "${LIB_DIR}/common/logger.sh"
-source "${LIB_DIR}/ozon/auth.sh"
-source "${LIB_DIR}/common/http.sh"
-source "${LIB_DIR}/common/formatter.sh"
-source "${LIB_DIR}/ozon/stocks.sh"
-source "${LIB_DIR}/common/audit.sh"
+source "${LIB_DIR}/common/platform.sh"
 
-# Цвета для вывода
+resolve_platform "$@"
+set -- "${REMAINING_ARGS[@]}"
+
+source_platform_libs "$CURRENT_PLATFORM" stocks
+
+PLATFORM_NAME=$(platform_display_name "$CURRENT_PLATFORM")
+
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Показать help
 show_help() {
     cat <<EOF
-Использование: mp-stocks <команда> [опции]
+Использование: mp-stocks [--platform ozon|wb|ymarket] <команда> [опции]
 
 Команды:
-  list                         Показать остатки всех товаров
-  list --low                   Показать только товары с низкими остатками (< 10)
-  get <sku>                    Показать остаток конкретного товара
-  update <sku> <quantity>      Обновить остаток товара
-  rollback <batch-id>          Откатить batch изменений
+  list                         Показать остатки
+  list --low                   Только товары с низкими остатками
+  get <sku>                    Остаток конкретного товара
+  update <sku> <quantity>      Обновить остаток
+  rollback <batch-id>          Откатить batch
   rollback --last              Откатить последний batch
-  history [--sku <sku>] [--last <N>]  Показать историю изменений
+  history                      История изменений
 
 Опции:
-  --mock                       Использовать mock данные (для тестирования без API)
+  --platform <name>            Платформа (ozon, wb, ymarket; по умолчанию ozon)
+  --mock                       Mock данные
+  --warehouse <id>             ID склада (wb: обязателен для update)
   --threshold <num>            Порог низкого остатка (по умолчанию 10)
-  --warehouse <id>             ID склада (опционально)
-  --limit <num>                Количество товаров (по умолчанию 100)
-
-Примеры:
-  mp-stocks list                           # Показать все остатки
-  mp-stocks list --low                     # Только товары с низкими остатками
-  mp-stocks list --low --threshold 5       # Остатки < 5 шт
-  mp-stocks list --mock                    # Тестирование с mock данными
-  mp-stocks get TWS-PRO-001                # Остаток конкретного товара
-  mp-stocks update TWS-PRO-001 100         # Установить остаток 100 шт
 
 EOF
 }
 
-# Команда: list - показать остатки
+_load_creds() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
+        wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
+        ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
+    esac
+}
+
+_get_stocks() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    get_stocks "$@" ;;
+        wb)      wb_get_stocks "$@" ;;
+        ymarket) ym_get_stocks "$@" ;;
+    esac
+}
+
+_get_stock_by_sku() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    get_stock_by_sku "$@" ;;
+        wb)      wb_get_stock_by_sku "$@" ;;
+        ymarket) ym_get_stock_by_sku "$@" ;;
+    esac
+}
+
+_update_stock() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    update_stock "$@" ;;
+        wb)      wb_update_stocks "$@" ;;
+        ymarket) ym_update_stocks "$@" ;;
+    esac
+}
+
+_format_stocks() {
+    case "$CURRENT_PLATFORM" in
+        ozon)    format_stocks "$1" "${2:-false}" ;;
+        wb)      format_wb_stocks "$1" ;;
+        ymarket) format_ym_stocks "$1" ;;
+    esac
+}
+
 cmd_list() {
     local args=()
     local show_low=false
     local is_mock=false
-    
-    # Парсинг аргументов
+
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --mock)
-                args+=("--mock")
-                is_mock=true
-                shift
-                ;;
-            --low)
-                show_low=true
-                shift
-                ;;
-            --threshold|--warehouse|--limit)
-                args+=("$1" "$2")
-                shift 2
-                ;;
-            *)
-                shift
-                ;;
+            --mock) args+=("--mock"); is_mock=true; shift ;;
+            --low) show_low=true; shift ;;
+            --threshold|--warehouse|--limit) args+=("$1" "$2"); shift 2 ;;
+            *) shift ;;
         esac
     done
-    
-    # Загрузить credentials если не mock режим
-    if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
-    fi
-    
+
+    [[ "$is_mock" == "false" ]] && _load_creds
+
     echo ""
-    echo -e "${BLUE}📦 Остатки товаров${NC}"
+    echo -e "${BLUE}📦 Остатки (${PLATFORM_NAME})${NC}"
     echo ""
-    
-    # Получить остатки
+
     local stocks_json
-    if [[ "$show_low" == "true" ]]; then
+    if [[ "$show_low" == "true" ]] && [[ "$CURRENT_PLATFORM" == "ozon" ]]; then
         stocks_json=$(check_low_stocks "${args[@]}")
     else
-        stocks_json=$(get_stocks "${args[@]}")
+        stocks_json=$(_get_stocks "${args[@]}")
     fi
-    
-    local result=$?
-    
-    if [[ $result -ne 0 ]]; then
-        echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2
-        exit 1
-    fi
-    
-    # Форматировать и вывести
-    format_stocks "$stocks_json" "$show_low"
-    
+
+    [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2 && exit 1
+
+    _format_stocks "$stocks_json" "$show_low"
     echo ""
 }
 
-# Команда: get - показать остаток товара
 cmd_get() {
-    local sku=$1
-    shift
-    
-    if [[ -z "$sku" ]]; then
-        echo "ERROR: Укажите SKU товара" >&2
-        echo "" >&2
-        echo "Использование: mp-stocks get <sku> [--mock]" >&2
-        echo "" >&2
-        exit 1
-    fi
-    
+    local sku=$1; shift
+    [[ -z "$sku" ]] && echo "ERROR: Укажите SKU" >&2 && exit 1
+
     local args=("$sku")
     local is_mock=false
-    
     while [[ $# -gt 0 ]]; do
-        case $1 in
-            --mock)
-                args+=("--mock")
-                is_mock=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
-        esac
+        [[ "$1" == "--mock" ]] && is_mock=true
+        args+=("$1"); shift
     done
-    
-    # Загрузить credentials если не mock режим
-    if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
-    fi
-    
+
+    [[ "$is_mock" == "false" ]] && _load_creds
+
     echo ""
-    echo -e "${BLUE}📦 Остаток товара${NC}"
+    echo -e "${BLUE}📦 Остаток товара (${PLATFORM_NAME})${NC}"
     echo ""
-    
-    # Получить остаток
-    local stock_data=$(get_stock_by_sku "${args[@]}")
-    local result=$?
-    
-    if [[ $result -ne 0 ]] || [[ -z "$stock_data" ]]; then
-        echo "Товар с SKU \"$sku\" не найден"
-        exit 1
-    fi
-    
-    # Форматировать вывод
+
+    local stock_data=$(_get_stock_by_sku "${args[@]}")
+    [[ -z "$stock_data" ]] && echo "Товар \"$sku\" не найден" && exit 1
+
     echo "$stock_data" | jq -r '
-"SKU: \(.sku)
-Название: \(.name // "не указано")
-📦 Остаток: \(.stock) шт
-🔒 Зарезервировано: \(.reserved) шт
-🏢 Склад: \(.warehouse_name // "не указан")" +
-(if .stock < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end)'
-    
+"SKU: \(.sku // .offerId // .offer_id // "N/A")
+📦 Остаток: \(.stock // .amount // .count // 0) шт" +
+(if (.stock // .amount // .count // 999) < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end)'
     echo ""
 }
 
-# Команда: update - обновить остаток
 cmd_update() {
     local sku=$1
     local new_quantity=$2
     shift 2
-    
-    if [[ -z "$sku" ]] || [[ -z "$new_quantity" ]]; then
-        echo "ERROR: Укажите SKU и новое количество" >&2
-        echo "" >&2
-        echo "Использование: mp-stocks update <sku> <quantity> [--mock] [--warehouse <id>]" >&2
-        echo "" >&2
-        exit 1
-    fi
-    
+
+    [[ -z "$sku" ]] || [[ -z "$new_quantity" ]] && echo "ERROR: Укажите SKU и количество" >&2 && exit 1
+
     local is_mock=false
     local auto_confirm=false
+    local warehouse_id=""
     local update_args=("$sku" "$new_quantity")
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --mock)
-                update_args+=("--mock")
-                is_mock=true
-                shift
-                ;;
-            --warehouse)
-                update_args+=("--warehouse" "$2")
-                shift 2
-                ;;
-            --yes)
-                auto_confirm=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
+            --mock) update_args+=("--mock"); is_mock=true; shift ;;
+            --warehouse) warehouse_id="$2"; update_args+=("--warehouse" "$2"); shift 2 ;;
+            --yes) auto_confirm=true; shift ;;
+            *) shift ;;
         esac
     done
-    
-    # Генерировать BATCH_ID для audit
+
+    # WB requires warehouseId
+    if [[ "$CURRENT_PLATFORM" == "wb" ]] && [[ -z "$warehouse_id" ]] && [[ "$is_mock" == "false" ]]; then
+        echo -e "${YELLOW}⚠️  WB: необходим --warehouse <id>. Получите список: mp-stocks list --platform wb${NC}" >&2
+    fi
+
+    # YM: warn about exact SKU matching
+    if [[ "$CURRENT_PLATFORM" == "ymarket" ]]; then
+        echo -e "${YELLOW}⚠️  Яндекс Маркет: SKU чувствителен к регистру и отступам${NC}"
+    fi
+
     export BATCH_ID=$(audit_generate_batch_id)
-    
-    # Загрузить credentials если не mock режим
-    if [[ "$is_mock" == "false" ]]; then
-        load_credentials
-        check_ozon_credentials || exit 1
-    fi
-    
+    [[ "$is_mock" == "false" ]] && _load_creds
+
     echo ""
-    echo -e "${BLUE}📦 Обновление остатка${NC}"
+    echo -e "${BLUE}📦 Обновление остатка (${PLATFORM_NAME})${NC}"
     echo ""
-    
-    # Получить текущий остаток
-    local get_args=("$sku")
-    [[ "$is_mock" == "true" ]] && get_args+=("--mock")
-    
-    local current_stock_data=$(get_stock_by_sku "${get_args[@]}")
-    
-    if [[ -n "$current_stock_data" ]]; then
-        local old_quantity=$(echo "$current_stock_data" | jq -r '.stock')
-        local product_name=$(echo "$current_stock_data" | jq -r '.name // "не указано"')
-        
-        echo "Товар: $product_name"
-        echo "SKU: $sku"
-        echo ""
-        echo "Текущий остаток: $old_quantity шт"
-        echo "Новый остаток:   $new_quantity шт"
-        echo ""
-    else
-        echo "SKU: $sku"
-        echo "Новый остаток: $new_quantity шт"
-        echo ""
-        echo -e "${YELLOW}WARNING: Не удалось получить текущий остаток${NC}"
-        echo ""
-    fi
-    
-    # Подтверждение
+
+    echo "SKU: $sku"
+    echo "Новый остаток: $new_quantity шт"
+    echo ""
+
     if [[ "$auto_confirm" == "false" ]]; then
-        read -p "Подтвердите обновление остатка (y/N): " confirm
-        
-        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-            echo "Отменено"
-            exit 0
-        fi
+        read -p "Подтвердите обновление (y/N): " confirm
+        [[ ! "$confirm" =~ ^[Yy]$ ]] && echo "Отменено" && exit 0
     fi
-    
-    # Race condition detection (R5): проверить что остаток не изменился
-    if [[ -n "$current_stock_data" ]]; then
-        local fresh_stock_data=$(get_stock_by_sku "${get_args[@]}")
-        if [[ -n "$fresh_stock_data" ]]; then
-            local fresh_quantity=$(echo "$fresh_stock_data" | jq -r '.stock')
-            local stocks_match=$(awk -v a="${old_quantity:-0}" -v b="$fresh_quantity" 'BEGIN {print (a == b) ? "yes" : "no"}')
-            if [[ "$stocks_match" == "no" ]]; then
-                echo ""
-                echo -e "${RED}⚠️ ВНИМАНИЕ: Остаток изменился с момента проверки!${NC}"
-                echo "   Было: ${old_quantity} шт (при проверке)"
-                echo "   Сейчас: ${fresh_quantity} шт (кто-то изменил)"
-                echo "   Ваше значение: $new_quantity шт"
-                echo ""
-                # --yes НЕ пропускает этот prompt (safety critical)
-                read -p "Продолжить? (y/N): " race_confirm
-                if [[ ! "$race_confirm" =~ ^[Yy]$ ]]; then
-                    echo "Отменено"
-                    exit 0
-                fi
-            fi
-        fi
-    fi
-    
-    echo ""
+
     echo "🔄 Обновление остатка..."
-    
-    # Добавить audit параметры
-    update_args+=("--batch-id" "$BATCH_ID" "--audit-old-stock" "${old_quantity:-unknown}")
-    
-    # Выполнить обновление
-    local update_json=$(update_stock "${update_args[@]}")
+
+    update_args+=("--batch-id" "$BATCH_ID")
+
+    local result_json=$(_update_stock "${update_args[@]}")
     local result=$?
-    
-    if [[ $result -ne 0 ]]; then
-        echo ""
-        echo -e "${RED}ERROR: Не удалось обновить остаток${NC}" >&2
-        exit 1
-    fi
-    
-    # Проверить результат
-    local updated=$(echo "$update_json" | jq -r '.result[0].updated // false')
-    local errors=$(echo "$update_json" | jq -r '.result[0].errors // [] | length')
-    
-    if [[ "$updated" == "true" ]] && [[ "$errors" == "0" ]]; then
-        echo ""
-        echo -e "${GREEN}✅ Остаток обновлён успешно!${NC}"
-        echo ""
-        
-        log_info "Stock updated: sku=$sku old=${old_quantity:-unknown} new=$new_quantity"
+
+    if [[ $result -eq 0 ]]; then
+        echo -e "${GREEN}✅ Остаток обновлён!${NC}"
     else
-        echo ""
-        echo -e "${RED}❌ Ошибка обновления остатка${NC}"
-        echo "$update_json" | jq -r '.result[0].errors[]' 2>/dev/null || echo "Неизвестная ошибка"
+        echo -e "${RED}❌ Ошибка обновления${NC}" >&2
         exit 1
     fi
+    echo ""
 }
 
-# Команда: rollback - откатить batch
 cmd_rollback() {
     local batch_id=""
     local is_mock=false
     local use_last=false
-    
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --last)
-                use_last=true
-                shift
-                ;;
-            --mock)
-                is_mock=true
-                shift
-                ;;
-            *)
-                batch_id="$1"
-                shift
-                ;;
+            --last) use_last=true; shift ;;
+            --mock) is_mock=true; shift ;;
+            *) batch_id="$1"; shift ;;
         esac
     done
-    
     if [[ "$use_last" == "true" ]]; then
         batch_id=$(audit_get_last_batch_id "stock_update")
-        if [[ -z "$batch_id" ]]; then
-            echo "ERROR: Нет предыдущих batch для отката" >&2
-            exit 1
-        fi
-        echo "Последний batch: $batch_id"
+        [[ -z "$batch_id" ]] && echo "ERROR: Нет batch для отката" >&2 && exit 1
     fi
-    
-    if [[ -z "$batch_id" ]]; then
-        echo "ERROR: Укажите batch ID или используйте --last" >&2
-        exit 1
-    fi
-    
+    [[ -z "$batch_id" ]] && echo "ERROR: Укажите batch ID или --last" >&2 && exit 1
     rollback_batch "$batch_id" "stock" "$is_mock" || true
 }
 
-# Команда: history - показать историю изменений
-cmd_history() {
-    audit_show_history "$@"
-}
+cmd_history() { audit_show_history "$@"; }
 
-# Main
 case "${1:-}" in
-    list)
-        shift
-        cmd_list "$@"
-        ;;
-    get)
-        shift
-        cmd_get "$@"
-        ;;
-    update)
-        shift
-        cmd_update "$@"
-        ;;
-    rollback)
-        shift
-        cmd_rollback "$@"
-        ;;
-    history)
-        shift
-        cmd_history "$@"
-        ;;
-    -h|--help|help)
-        show_help
-        ;;
-    "")
-        echo "ERROR: Команда не указана" >&2
-        echo "" >&2
-        show_help
-        exit 1
-        ;;
-    *)
-        echo "ERROR: Неизвестная команда: $1" >&2
-        echo "" >&2
-        show_help
-        exit 1
-        ;;
+    list)     shift; cmd_list "$@" ;;
+    get)      shift; cmd_get "$@" ;;
+    update)   shift; cmd_update "$@" ;;
+    rollback) shift; cmd_rollback "$@" ;;
+    history)  shift; cmd_history "$@" ;;
+    -h|--help|help) show_help ;;
+    "") echo "ERROR: Команда не указана" >&2; show_help; exit 1 ;;
+    *)  echo "ERROR: Неизвестная команда: $1" >&2; show_help; exit 1 ;;
 esac

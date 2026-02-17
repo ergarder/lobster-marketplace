@@ -1,146 +1,171 @@
 #!/bin/bash
-# Интерактивная настройка Ozon API credentials
+# Интерактивная настройка API credentials (мульти-платформа)
 
 set -e
 
-# Определить директорию скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
 
-# Загрузить модули
 source "${LIB_DIR}/common/logger.sh"
-source "${LIB_DIR}/ozon/auth.sh"
+source "${LIB_DIR}/common/platform.sh"
 
-# Цвета для вывода
+# Парсинг --platform
+resolve_platform "$@"
+set -- "${REMAINING_ARGS[@]}"
+
+PLATFORM_NAME=$(platform_display_name "$CURRENT_PLATFORM")
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "  🚀 Настройка Ozon Seller API для OpenClaw"
+echo "  🚀 Настройка ${PLATFORM_NAME} API для OpenClaw"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# Проверить существующие credentials
-if [[ -f "$CREDENTIALS_FILE" ]]; then
-    echo -e "${YELLOW}⚠️  Обнаружена существующая конфигурация${NC}"
-    echo ""
-    
-    load_credentials
-    echo "Client ID: $OZON_CLIENT_ID"
-    echo "API Key: ${OZON_API_KEY:0:10}***"
-    echo ""
-    
-    read -p "Перезаписать? (y/N): " overwrite
-    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
-        echo "Отменено"
-        exit 0
-    fi
-    echo ""
-fi
+case "$CURRENT_PLATFORM" in
+    ozon)
+        source "${LIB_DIR}/ozon/auth.sh"
+        source "${LIB_DIR}/common/http.sh"
+        source "${LIB_DIR}/ozon/http.sh"
 
-# Инструкция как получить ключи
-echo "📋 Как получить API ключи:"
-echo ""
-echo "1. Зайдите в личный кабинет Ozon Seller"
-echo "   https://seller.ozon.ru/"
-echo ""
-echo "2. Перейдите в раздел: Настройки → API ключи"
-echo ""
-echo "3. Создайте новый ключ:"
-echo "   • Название: OpenClaw Integration"
-echo "   • Права: Admin (полный доступ) или Content + Analytics"
-echo ""
-echo "4. Скопируйте Client-Id и Api-Key"
-echo ""
-echo "═══════════════════════════════════════════════════════════════"
-echo ""
+        if [[ -f "$CREDENTIALS_FILE" ]]; then
+            echo -e "${YELLOW}⚠️  Обнаружена существующая конфигурация${NC}"
+            load_credentials
+            echo "Client ID: $OZON_CLIENT_ID"
+            echo "API Key: ${OZON_API_KEY:0:10}***"
+            echo ""
+            read -p "Перезаписать? (y/N): " overwrite
+            [[ ! "$overwrite" =~ ^[Yy]$ ]] && echo "Отменено" && exit 0
+            echo ""
+        fi
 
-# Ввод Client ID
-while true; do
-    read -p "Введите Client ID: " client_id
-    
-    # Валидация
-    if [[ -z "$client_id" ]]; then
-        echo -e "${RED}ERROR: Client ID не может быть пустым${NC}"
-        continue
-    fi
-    
-    if ! [[ "$client_id" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED}ERROR: Client ID должен быть числом${NC}"
-        continue
-    fi
-    
-    break
-done
+        echo "📋 Как получить API ключи:"
+        echo "1. https://seller.ozon.ru/ → Настройки → API ключи"
+        echo "2. Создайте ключ: OpenClaw Integration (права Admin)"
+        echo "3. Скопируйте Client-Id и Api-Key"
+        echo ""
 
-# Ввод API Key
-while true; do
-    read -s -p "Введите API Key: " api_key
-    echo ""
-    
-    # Валидация
-    if [[ -z "$api_key" ]]; then
-        echo -e "${RED}ERROR: API Key не может быть пустым${NC}"
-        continue
-    fi
-    
-    if [[ ${#api_key} -lt 10 ]]; then
-        echo -e "${RED}ERROR: API Key слишком короткий${NC}"
-        continue
-    fi
-    
-    break
-done
+        while true; do
+            read -p "Введите Client ID: " client_id
+            [[ -z "$client_id" ]] && echo -e "${RED}ERROR: Не может быть пустым${NC}" && continue
+            [[ ! "$client_id" =~ ^[0-9]+$ ]] && echo -e "${RED}ERROR: Должен быть числом${NC}" && continue
+            break
+        done
+
+        while true; do
+            read -s -p "Введите API Key: " api_key; echo
+            [[ -z "$api_key" ]] && echo -e "${RED}ERROR: Не может быть пустым${NC}" && continue
+            [[ ${#api_key} -lt 10 ]] && echo -e "${RED}ERROR: Слишком короткий${NC}" && continue
+            break
+        done
+
+        if save_credentials "$client_id" "$api_key"; then
+            export OZON_CLIENT_ID="$client_id"
+            export OZON_API_KEY="$api_key"
+            echo ""
+            if test_ozon_connection; then
+                echo -e "${GREEN}✅ Настройка завершена!${NC}"
+            else
+                echo -e "${RED}❌ Credentials сохранены, но подключение не удалось${NC}"
+                exit 1
+            fi
+        fi
+        ;;
+
+    wb)
+        source "${LIB_DIR}/wb/auth.sh"
+
+        if [[ -f "$WB_CREDENTIALS_FILE" ]]; then
+            echo -e "${YELLOW}⚠️  Обнаружена существующая конфигурация WB${NC}"
+            load_wb_credentials
+            echo "Token: ${WB_API_TOKEN:0:15}***"
+            echo ""
+            read -p "Перезаписать? (y/N): " overwrite
+            [[ ! "$overwrite" =~ ^[Yy]$ ]] && echo "Отменено" && exit 0
+            echo ""
+        fi
+
+        echo "📋 Как получить API токен Wildberries:"
+        echo "1. https://seller.wildberries.ru/ → Настройки → API токены"
+        echo "2. Создайте токен с категориями: Marketplace, Content, Analytics"
+        echo "   ⚠️  Разные эндпоинты требуют токены разных категорий"
+        echo "3. Скопируйте токен"
+        echo ""
+
+        while true; do
+            read -s -p "Введите API Token: " token; echo
+            [[ -z "$token" ]] && echo -e "${RED}ERROR: Не может быть пустым${NC}" && continue
+            [[ ${#token} -lt 20 ]] && echo -e "${RED}ERROR: Токен слишком короткий${NC}" && continue
+            break
+        done
+
+        if save_wb_credentials "$token"; then
+            export WB_API_TOKEN="$token"
+            source "${LIB_DIR}/common/http.sh"
+            source "${LIB_DIR}/wb/http.sh"
+            echo ""
+            if test_wb_connection; then
+                echo -e "${GREEN}✅ Настройка WB завершена!${NC}"
+            else
+                echo -e "${RED}❌ Credentials сохранены, но подключение не удалось${NC}"
+                exit 1
+            fi
+        fi
+        ;;
+
+    ymarket)
+        source "${LIB_DIR}/ymarket/auth.sh"
+
+        if [[ -f "$YM_CREDENTIALS_FILE" ]]; then
+            echo -e "${YELLOW}⚠️  Обнаружена существующая конфигурация Яндекс Маркет${NC}"
+            load_ym_credentials
+            echo "API Key: ${YM_API_KEY:0:15}***"
+            echo "Business ID: ${YM_BUSINESS_ID:-не установлен}"
+            echo "Campaign ID: ${YM_CAMPAIGN_ID:-не установлен}"
+            echo ""
+            read -p "Перезаписать? (y/N): " overwrite
+            [[ ! "$overwrite" =~ ^[Yy]$ ]] && echo "Отменено" && exit 0
+            echo ""
+        fi
+
+        echo "📋 Как получить API ключ Яндекс Маркет:"
+        echo "1. https://partner.market.yandex.ru/ → Настройки → API и модули"
+        echo "2. Создайте новый токен (макс. 30 на кабинет)"
+        echo "   ⚠️  Изменения прав токена вступают в силу через ~10 минут"
+        echo "3. Скопируйте API Key"
+        echo ""
+
+        while true; do
+            read -s -p "Введите API Key: " api_key; echo
+            [[ -z "$api_key" ]] && echo -e "${RED}ERROR: Не может быть пустым${NC}" && continue
+            [[ ${#api_key} -lt 10 ]] && echo -e "${RED}ERROR: Слишком короткий${NC}" && continue
+            break
+        done
+
+        if save_ym_credentials "$api_key"; then
+            export YM_API_KEY="$api_key"
+            source "${LIB_DIR}/common/http.sh"
+            source "${LIB_DIR}/ymarket/http.sh"
+            echo ""
+            echo "🔄 Проверка подключения и получение ID..."
+            if test_ym_connection; then
+                echo -e "${GREEN}✅ Настройка Яндекс Маркет завершена!${NC}"
+            else
+                echo -e "${RED}❌ Credentials сохранены, но подключение не удалось${NC}"
+                exit 1
+            fi
+        fi
+        ;;
+esac
 
 echo ""
-echo "─────────────────────────────────────────────────────────────"
+echo "Доступные команды:"
+echo "  mp-test --platform $CURRENT_PLATFORM          - проверить подключение"
+echo "  mp-orders list --platform $CURRENT_PLATFORM    - показать заказы"
+echo "  mp-prices list --platform $CURRENT_PLATFORM    - показать цены"
+echo "  mp-stocks list --platform $CURRENT_PLATFORM    - показать остатки"
 echo ""
-
-# Сохранить credentials
-if save_credentials "$client_id" "$api_key"; then
-    echo ""
-    echo "🔄 Проверка подключения к Ozon API..."
-    echo ""
-    
-    # Загрузить сохранённые credentials
-    export OZON_CLIENT_ID="$client_id"
-    export OZON_API_KEY="$api_key"
-    
-    # Source http.sh для проверки подключения
-    source "${LIB_DIR}/common/http.sh"
-    
-    # Проверить подключение
-    if test_ozon_connection; then
-        echo ""
-        echo -e "${GREEN}✅ Настройка завершена успешно!${NC}"
-        echo ""
-        echo "Доступные команды:"
-        echo "  mp-test          - проверить подключение"
-        echo "  mp-orders list   - показать заказы"
-        echo "  mp-prices        - управление ценами"
-        echo "  mp-stocks        - управление остатками"
-        echo ""
-        
-        log_info "Ozon API setup completed successfully"
-        exit 0
-    else
-        echo ""
-        echo -e "${RED}❌ Не удалось подключиться к Ozon API${NC}"
-        echo ""
-        echo "Credentials сохранены, но подключение не удалось."
-        echo "Проверьте правильность Client ID и API Key."
-        echo ""
-        echo "Для повторной настройки запустите: mp-setup"
-        
-        log_error "Ozon API setup failed - connection test failed"
-        exit 1
-    fi
-else
-    echo ""
-    echo -e "${RED}❌ Ошибка сохранения credentials${NC}"
-    log_error "Failed to save credentials"
-    exit 1
-fi

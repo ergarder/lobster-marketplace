@@ -1,6 +1,183 @@
 #!/bin/bash
 # Форматирование JSON данных в human-readable формат для агента
 
+# === Общие утилиты для мульти-платформы ===
+
+# Конвертировать копейки в рубли
+# Args: $1 - сумма в копейках (целое число)
+kopecks_to_rubles() {
+    local kopecks="${1:-0}"
+    awk -v k="$kopecks" 'BEGIN {printf "%.2f", k / 100}'
+}
+
+# Конвертировать рубли в копейки
+# Args: $1 - сумма в рублях (десятичное число)
+rubles_to_kopecks() {
+    local rubles="${1:-0}"
+    awk -v r="$rubles" 'BEGIN {printf "%d", r * 100}'
+}
+
+# Конвертировать ISO 4217 numeric → string
+# Args: $1 - числовой код (643, 933, ...)
+numeric_currency_to_iso() {
+    case "${1:-}" in
+        643) echo "RUB" ;;
+        933) echo "BYN" ;;
+        840) echo "USD" ;;
+        978) echo "EUR" ;;
+        398) echo "KZT" ;;
+        *)   echo "$1" ;;
+    esac
+}
+
+# Нормализовать код валюты (RUR → RUB)
+normalize_currency() {
+    case "${1:-}" in
+        RUR) echo "RUB" ;;
+        *)   echo "$1" ;;
+    esac
+}
+
+# Конвертировать Unix timestamp → human date
+# Args: $1 - unix timestamp (seconds)
+format_unix_timestamp() {
+    local ts="$1"
+    if date --version >/dev/null 2>&1; then
+        date -d "@$ts" '+%d.%m.%Y %H:%M' 2>/dev/null || echo "$ts"
+    else
+        date -r "$ts" '+%d.%m.%Y %H:%M' 2>/dev/null || echo "$ts"
+    fi
+}
+
+# === Форматтеры WB ===
+
+format_wb_orders() {
+    local json=$1
+    local count=$(echo "$json" | jq -r '.orders | length' 2>/dev/null)
+
+    if [[ -z "$count" ]] || [[ "$count" == "0" ]] || [[ "$count" == "null" ]]; then
+        echo "Нет новых заказов"
+        return 0
+    fi
+
+    echo "📦 Найдено заказов: $count"
+    echo ""
+
+    echo "$json" | jq -r '
+        .orders[] |
+        "Заказ №\(.id)\n" +
+        "📊 Статус продавца: \(.supplierStatus)\n" +
+        "📊 Статус WB: \(.wbStatus)\n" +
+        "💰 Цена: \(.salePrice / 100) ₽\n" +
+        "📅 Создан: \(.createdAt)\n" +
+        "---"
+    '
+}
+
+format_wb_order_status() {
+    local json=$1
+    echo "$json" | jq -r '.orders[] |
+"Заказ №\(.id)
+📊 Статус продавца: \(.supplierStatus)
+📊 Статус WB: \(.wbStatus)
+💰 Цена: \(.salePrice / 100) ₽
+🏷️ Артикул: \(.article)
+---"'
+}
+
+format_wb_price() {
+    local json=$1
+    echo "$json" | jq -r '.data.listGoods[0] //
+    {nmID: "N/A", sizes: [{price: 0}]} |
+"Артикул: \(.nmID)
+💰 Цена: \(.sizes[0].price / 100) ₽"'
+}
+
+format_wb_stocks() {
+    local json=$1
+    local count=$(echo "$json" | jq -r '.stocks | length' 2>/dev/null)
+
+    if [[ -z "$count" ]] || [[ "$count" == "0" ]] || [[ "$count" == "null" ]]; then
+        echo "Нет данных об остатках"
+        return 0
+    fi
+
+    echo "📊 Остатки (позиций: $count):"
+    echo ""
+
+    echo "$json" | jq -r '.stocks[] |
+"SKU: \(.sku)
+📦 Остаток: \(.amount) шт
+---"'
+}
+
+# === Форматтеры Yandex Market ===
+
+format_ym_orders() {
+    local json=$1
+    local count=$(echo "$json" | jq -r '.orders | length' 2>/dev/null)
+
+    if [[ -z "$count" ]] || [[ "$count" == "0" ]] || [[ "$count" == "null" ]]; then
+        echo "Нет новых заказов"
+        return 0
+    fi
+
+    echo "📦 Найдено заказов: $count"
+    echo ""
+
+    echo "$json" | jq -r '
+        .orders[] |
+        "Заказ №\(.orderId)\n" +
+        "📊 Статус: \(.status)" +
+        (if .substatus then " (\(.substatus))" else "" end) + "\n" +
+        "🏪 Модель: \(.programType // "N/A")\n" +
+        "📅 Создан: \(.creationDate)\n" +
+        "---"
+    '
+}
+
+format_ym_order_status() {
+    local json=$1
+    echo "$json" | jq -r '.order |
+"Заказ №\(.orderId)
+📊 Статус: \(.status)" +
+(if .substatus then " (\(.substatus))" else "" end) + "
+🏪 Модель: \(.programType // "N/A")
+📅 Создан: \(.creationDate)
+💰 Товары:" +
+(.items[] | "
+  • \(.offerId)
+    Кол-во: \(.count) шт
+    Цена: \(.prices.payment.value) ₽")'
+}
+
+format_ym_price() {
+    local json=$1
+    echo "$json" | jq -r '.result.offers[0] // {offerId:"N/A"} |
+"SKU: \(.offerId)
+💰 Цена: \(.price.value // "N/A") ₽
+Валюта: \(.price.currencyId // "N/A")"'
+}
+
+format_ym_stocks() {
+    local json=$1
+    local count=$(echo "$json" | jq -r '.warehouses[0].offers | length' 2>/dev/null)
+
+    if [[ -z "$count" ]] || [[ "$count" == "0" ]] || [[ "$count" == "null" ]]; then
+        echo "Нет данных об остатках"
+        return 0
+    fi
+
+    echo "📊 Остатки (позиций: $count):"
+    echo ""
+
+    echo "$json" | jq -r '.warehouses[].offers[] |
+"SKU: \(.offerId)
+📦 Остаток: \(.stocks[0].count // 0) шт
+Обновлено: \(.stocks[0].updatedAt // "N/A")
+---"'
+}
+
 # Форматировать список заказов
 # Input: JSON с заказами из Ozon API
 format_orders() {

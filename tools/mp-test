@@ -1,73 +1,100 @@
 #!/bin/bash
-# Проверка подключения к Ozon API
+# Проверка подключения к API маркетплейса (мульти-платформа)
 
 set -e
 
-# Определить директорию скрипта
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$(cd "${SCRIPT_DIR}/../lib" && pwd)"
 
-# Загрузить модули
 source "${LIB_DIR}/common/logger.sh"
-source "${LIB_DIR}/ozon/auth.sh"
-source "${LIB_DIR}/common/http.sh"
+source "${LIB_DIR}/common/platform.sh"
 
-# Цвета для вывода
+resolve_platform "$@"
+set -- "${REMAINING_ARGS[@]}"
+
+PLATFORM_NAME=$(platform_display_name "$CURRENT_PLATFORM")
+
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
-echo "  🔍 Проверка подключения к Ozon Seller API"
+echo "  🔍 Проверка подключения к ${PLATFORM_NAME} API"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# Проверить наличие credentials файла
-if [[ ! -f "$CREDENTIALS_FILE" ]]; then
-    echo -e "${RED}❌ Credentials не настроены${NC}"
-    echo ""
-    echo "Для настройки выполните: mp-setup"
-    echo ""
-    exit 1
-fi
+case "$CURRENT_PLATFORM" in
+    ozon)
+        source "${LIB_DIR}/ozon/auth.sh"
+        source "${LIB_DIR}/common/http.sh"
+        source "${LIB_DIR}/ozon/http.sh"
 
-# Загрузить credentials
-load_credentials
+        if [[ ! -f "$CREDENTIALS_FILE" ]]; then
+            echo -e "${RED}❌ Credentials не настроены${NC}"
+            echo "Для настройки: mp-setup --platform ozon"
+            exit 1
+        fi
+        load_credentials
+        echo -e "${BLUE}📋 Конфигурация:${NC}"
+        echo "  Client ID: $OZON_CLIENT_ID"
+        echo "  API Key: ${OZON_API_KEY:0:10}***"
+        echo "  Режим: ${MODE:-production}"
+        echo ""
+        if test_ozon_connection; then
+            echo -e "${GREEN}✅ Все проверки пройдены!${NC}"
+        else
+            echo -e "${RED}❌ Проверка не удалась${NC}"
+            exit 1
+        fi
+        ;;
+    wb)
+        source "${LIB_DIR}/wb/auth.sh"
+        source "${LIB_DIR}/common/http.sh"
+        source "${LIB_DIR}/wb/http.sh"
 
-# Показать текущую конфигурацию
-echo -e "${BLUE}📋 Конфигурация:${NC}"
-echo "  Client ID: $OZON_CLIENT_ID"
-echo "  API Key: ${OZON_API_KEY:0:10}***"
-echo "  Режим: ${MODE:-production}"
+        if [[ ! -f "$WB_CREDENTIALS_FILE" ]]; then
+            echo -e "${RED}❌ WB credentials не настроены${NC}"
+            echo "Для настройки: mp-setup --platform wb"
+            exit 1
+        fi
+        load_wb_credentials
+        echo -e "${BLUE}📋 Конфигурация WB:${NC}"
+        echo "  Token: ${WB_API_TOKEN:0:15}***"
+        echo "  Режим: ${WB_MODE:-production}"
+        echo ""
+        if test_wb_connection; then
+            echo -e "${GREEN}✅ WB: все проверки пройдены!${NC}"
+        else
+            echo -e "${RED}❌ WB: проверка не удалась${NC}"
+            exit 1
+        fi
+        ;;
+    ymarket)
+        source "${LIB_DIR}/ymarket/auth.sh"
+        source "${LIB_DIR}/common/http.sh"
+        source "${LIB_DIR}/ymarket/http.sh"
+
+        if [[ ! -f "$YM_CREDENTIALS_FILE" ]]; then
+            echo -e "${RED}❌ Яндекс Маркет credentials не настроены${NC}"
+            echo "Для настройки: mp-setup --platform ymarket"
+            exit 1
+        fi
+        load_ym_credentials
+        echo -e "${BLUE}📋 Конфигурация Яндекс Маркет:${NC}"
+        echo "  API Key: ${YM_API_KEY:0:15}***"
+        echo "  Business ID: ${YM_BUSINESS_ID:-не установлен}"
+        echo "  Campaign ID: ${YM_CAMPAIGN_ID:-не установлен}"
+        echo "  Режим: ${YM_MODE:-production}"
+        echo ""
+        if test_ym_connection; then
+            echo -e "${GREEN}✅ Яндекс Маркет: все проверки пройдены!${NC}"
+        else
+            echo -e "${RED}❌ Яндекс Маркет: проверка не удалась${NC}"
+            exit 1
+        fi
+        ;;
+esac
+
 echo ""
-
-# Проверить подключение
-if test_ozon_connection; then
-    echo ""
-    echo "─────────────────────────────────────────────────────────────"
-    echo ""
-    echo -e "${GREEN}✅ Все проверки пройдены успешно!${NC}"
-    echo ""
-    echo "Доступные команды:"
-    echo "  mp-orders list      - показать новые заказы"
-    echo "  mp-prices get SKU   - получить цену товара"
-    echo "  mp-stocks list      - показать остатки"
-    echo ""
-    exit 0
-else
-    echo ""
-    echo "─────────────────────────────────────────────────────────────"
-    echo ""
-    echo -e "${RED}❌ Проверка подключения не удалась${NC}"
-    echo ""
-    echo "Рекомендации:"
-    echo "  1. Проверьте правильность Client ID и API Key"
-    echo "  2. Убедитесь что API ключ имеет нужные права"
-    echo "  3. Проверьте подключение к интернету"
-    echo ""
-    echo "Для повторной настройки: mp-setup"
-    echo ""
-    exit 1
-fi
