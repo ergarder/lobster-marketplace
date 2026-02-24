@@ -1,55 +1,59 @@
-# OpenClaw Marketplace RU — Ozon Seller API
+# OpenClaw Marketplace RU
 
-AI-ассистент для управления продажами на Ozon маркетплейсе через OpenClaw.
+AI-ассистент для управления продажами на российских маркетплейсах через OpenClaw.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-0.8.0+-blue.svg)](https://openclaw.ai)
 
-## 🚀 Возможности
+## Поддерживаемые платформы
 
-- 📦 **Мониторинг заказов** — новые заказы FBS/FBO, статусы, дедлайны отгрузки
-- 💰 **Управление ценами** — просмотр и обновление цен с подтверждением и валидацией
-- 📊 **Управление остатками** — контроль остатков на складах, алерты о низких запасах
-- ⚡️ **Быстрые команды** — все операции доступны через CLI и AI-ассистента
-- 🤖 **AI-автоматизация** — утренние дайджесты, мониторинг, умные рекомендации
-- 🔒 **Безопасность** — credentials хранятся локально с правами 0600
+| Платформа | Заказы | Цены | Остатки | Особенности |
+|-----------|--------|------|---------|-------------|
+| **Ozon** | FBS/FBO | Рубли | По складам | Seller API v3/v4 |
+| **Wildberries** | FBS | Копейки → рубли | По складам | Dual status, 409=10x penalty |
+| **Яндекс Маркет** | FBS | Рубли (RUR) | По кампаниям | Карантин цен, 100+ субстатусов |
 
-## 📋 Требования
+## Возможности
+
+- **Мониторинг заказов** — новые заказы, статусы, дедлайны отгрузки на всех площадках
+- **Управление ценами** — просмотр и обновление цен с подтверждением, валидацией (±50%), rollback
+- **Управление остатками** — контроль остатков на складах, алерты о низких запасах
+- **Audit log** — полная история всех изменений цен и остатков с возможностью отката
+- **Мульти-платформа** — единый интерфейс для всех маркетплейсов, `--platform` переключает площадку
+- **Mock режим** — тестирование без реального API (`--mock`)
+- **AI-автоматизация** — утренние дайджесты, мониторинг, умные рекомендации через OpenClaw
+
+## Требования
 
 - **OpenClaw** 0.8.0 или выше
 - **jq** — JSON processor
 - **curl** — HTTP клиент
-- **bash** 4.0+
+- **bash** 3.2+ (macOS default) или 4.0+
 
 ### Установка зависимостей
 
-**Ubuntu/Debian:**
 ```bash
-sudo apt-get install jq curl
-```
-
-**macOS:**
-```bash
+# macOS
 brew install jq curl
-```
 
-**Alpine Linux:**
-```bash
+# Ubuntu/Debian
+sudo apt-get install jq curl
+
+# Alpine Linux
 apk add jq curl bash
 ```
 
-## 🛠️ Установка
+## Установка
 
-### Способ 1: Через OpenClaw Skills (рекомендуется)
+### Через OpenClaw Skills (рекомендуется)
 
 ```bash
 openclaw skills add https://github.com/smvlx/openclaw-marketplace-ru
 ```
 
-### Способ 2: Ручная установка
+### Ручная установка
 
 ```bash
-# Клонировать репозиторий
 git clone https://github.com/smvlx/openclaw-marketplace-ru.git
 cd openclaw-marketplace-ru
 
@@ -60,320 +64,326 @@ export PATH="$PWD/tools:$PATH"
 sudo ln -s $PWD/tools/mp-* /usr/local/bin/
 ```
 
-## ⚙️ Настройка Ozon API
+## Настройка
 
-### Шаг 1: Получить API ключи
-
-1. Зайдите в [личный кабинет Ozon Seller](https://seller.ozon.ru/)
-2. Перейдите в **Настройки → API ключи**
-3. Нажмите **Создать новый ключ**
-4. Укажите название: `OpenClaw Integration`
-5. Выберите права:
-   - **Admin** (полный доступ) или
-   - **Content + Analytics** (минимальные права для MVP)
-6. Скопируйте **Client-Id** и **Api-Key**
-
-### Шаг 2: Настроить credentials
+Каждая платформа настраивается отдельно через `mp-setup`:
 
 ```bash
-mp-setup
+mp-setup --platform ozon      # Ozon Seller API
+mp-setup --platform wb         # Wildberries
+mp-setup --platform ymarket    # Яндекс Маркет
 ```
 
-Следуйте инструкциям на экране:
-- Введите **Client ID** (числовой идентификатор)
-- Введите **API Key** (секретный ключ)
+Без `--platform` по умолчанию настраивается Ozon.
 
-Credentials будут сохранены в `~/.openclaw/marketplace/credentials.env` с правами 0600.
+### Ozon
 
-### Шаг 3: Проверить подключение
+1. [Личный кабинет Ozon Seller](https://seller.ozon.ru/) → Настройки → API ключи
+2. Создайте ключ с правами **Admin** или **Content + Analytics**
+3. Запустите `mp-setup --platform ozon`, введите **Client ID** (число) и **API Key**
+
+### Wildberries
+
+1. [Кабинет WB](https://seller.wildberries.ru/) → Настройки → API токены
+2. Создайте токен с категориями: **Marketplace**, **Content**, **Analytics**
+3. Запустите `mp-setup --platform wb`, введите **API Token**
+
+> Разные эндпоинты WB требуют токены разных категорий. Один токен с нужными категориями покрывает все операции.
+
+### Яндекс Маркет
+
+1. [Кабинет Яндекс Маркет](https://partner.market.yandex.ru/) → Настройки → API и модули
+2. Создайте токен (макс. 30 на кабинет)
+3. Запустите `mp-setup --platform ymarket`, введите **API Key**
+
+> Изменения scope токена вступают в силу через ~10 минут. Business ID и Campaign ID определяются автоматически при первом подключении.
+
+### Проверка подключения
 
 ```bash
-mp-test
+mp-test --platform ozon
+mp-test --platform wb
+mp-test --platform ymarket
 ```
 
-Если всё настроено правильно, вы увидите:
-```
-✅ Ozon API: Подключено
-Client ID: 12345
-Товаров в каталоге: 150
-```
+Credentials хранятся в `~/.openclaw/marketplace/` с правами 0600:
+- `ozon.env` — Ozon credentials
+- `wb.env` — Wildberries credentials
+- `ymarket.env` — Яндекс Маркет credentials
 
-## 📚 Использование
+## Использование
 
-### Команды CLI
+Все команды принимают `--platform ozon|wb|ymarket` (по умолчанию `ozon`) и `--mock` для тестирования.
 
-#### Заказы
+### Заказы
 
 ```bash
-# Показать новые/активные заказы
-mp-orders list
+# Показать заказы
+mp-orders list --platform ozon
+mp-orders list --platform wb
+mp-orders list --platform ymarket
 
 # Статус конкретного заказа
-mp-orders status 12345678-0001-1
+mp-orders status 12345678-0001-1                    # Ozon: posting number
+mp-orders status 987654321 --platform wb             # WB: числовой ID
+mp-orders status 77001122 --platform ymarket         # YM: order ID
 
-# Статистика заказов
-mp-orders stats
+# Статистика
+mp-orders stats --platform wb
 
-# Тестирование с mock данными (без реального API)
+# Mock режим
 mp-orders list --mock
 ```
 
-#### Цены
+### Цены
 
 ```bash
-# Получить текущую цену товара
+# Получить цену
 mp-prices get TWS-PRO-001
+mp-prices get 12345678 --platform wb              # WB: nmID (число)
+mp-prices get TWS-PRO-001 --platform ymarket
 
 # Обновить цену (с подтверждением)
 mp-prices update TWS-PRO-001 2500
+mp-prices update 12345678 1999 --platform wb      # ввод в рублях, конвертация в копейки автоматически
+mp-prices update TWS-PRO-001 2500 --platform ymarket
 
-# Обновить цену со старой ценой (зачёркнутой)
+# Со старой ценой (Ozon: зачёркнутая цена)
 mp-prices update TWS-PRO-001 2500 --old-price 2999
 
-# Показать цены всех товаров
-mp-prices list
+# Автоподтверждение (только для изменений ≤50%)
+mp-prices update TWS-PRO-001 2500 --yes
 
-# Тестирование с mock данными
-mp-prices get TWS-PRO-001 --mock
+# Показать все цены
+mp-prices list --platform wb
+
+# Яндекс Маркет: карантин цен (при изменении >5%)
+mp-prices confirm-quarantine --platform ymarket
 ```
 
-**⚠️ ВАЖНО:** Обновление цен всегда требует подтверждения! Система покажет:
-- Старую и новую цену
-- Процент изменения
-- Предупреждение если изменение > ±50%
+**Защита от ошибок:**
+- Изменение > ±50% требует дополнительного подтверждения
+- `--yes` не работает для изменений > 50% (нужен `--force`)
+- Цена не может быть 0
 
-#### Остатки
+### Остатки
 
 ```bash
-# Показать все остатки
+# Все остатки
 mp-stocks list
+mp-stocks list --platform wb
+mp-stocks list --platform ymarket
 
-# Показать только товары с низкими остатками (< 10 шт)
-mp-stocks list --low
+# Товары с низкими остатками
+mp-stocks list --low                        # < 10 шт (по умолчанию)
+mp-stocks list --low --threshold 5          # < 5 шт
 
-# Показать товары с остатком < 5 шт
-mp-stocks list --low --threshold 5
-
-# Получить остаток конкретного товара
+# Конкретный товар
 mp-stocks get TWS-PRO-001
 
 # Обновить остаток
 mp-stocks update TWS-PRO-001 100
+mp-stocks update 2000000000011 50 --platform wb --warehouse 507921  # WB требует warehouse ID
+mp-stocks update TWS-PRO-001 100 --platform ymarket
+```
 
-# Тестирование с mock данными
-mp-stocks list --mock
+> **WB:** для обновления остатков обязателен `--warehouse <id>`. Список складов: `mp-stocks list --platform wb`.
+>
+> **Яндекс Маркет:** SKU чувствителен к регистру и отступам.
+
+### Audit Log и Rollback
+
+Все изменения цен и остатков записываются в audit log:
+
+```bash
+# История изменений
+mp-prices history                              # Последние 20 записей
+mp-prices history --sku TWS-PRO-001            # История SKU
+mp-prices history --last 50                    # Последние 50
+mp-stocks history                              # История остатков
+
+# Rollback
+mp-prices rollback --last                      # Откатить последний batch
+mp-prices rollback 20260216-143022-a1b2c3d4    # По конкретному ID
+mp-stocks rollback --last --mock               # Тест в mock режиме
+```
+
+Формат audit log: `TIMESTAMP|USER|PLATFORM|BATCH_ID|ACTION|SKU|OLD_VALUE|NEW_VALUE|STATUS`
+
+**Важно:**
+- Rollback всегда требует ручного подтверждения
+- Нельзя откатить batch с ошибками (все записи должны быть `success`)
+- Нельзя откатить rollback (защита от цикличности)
+- Ротация: записи старше 90 дней удаляются автоматически
+
+### Утренний дайджест
+
+```bash
+# Все платформы
+./examples/morning-digest.sh --platform all
+
+# Конкретная платформа
+./examples/morning-digest.sh --platform wb
+
+# Тест
+./examples/morning-digest.sh --platform all --mock
 ```
 
 ### Примеры для AI-ассистента
 
 ```
-👤 Покажи новые заказы на Ozon
-🤖 [Запускает mp-orders list]
-   📦 Найдено заказов: 3
-   
-   Заказ №12345678-0001-1
-   📊 Статус: awaiting_packaging
-   📦 Товаров: 2 шт
-   💰 Сумма: 3998 ₽
-   ⏰ Отгрузка до: завтра в 12:00
-   ...
+👤 Покажи заказы на всех площадках
+🤖 [Запускает mp-orders для каждой платформы]
+   📦 Ozon: 3 заказа (2 ожидают сборки)
+   📦 WB: 5 заказов (3 новых)
+   📦 Яндекс: 2 заказа (1 в обработке)
 
-👤 Подними цену на TWS-PRO-001 до 2500 рублей
-🤖 [Получает текущую цену: 1999 ₽]
-   Текущая цена: 1999 ₽
-   Новая цена: 2500 ₽
-   Изменение: +25.06%
-   
-   Подтвердить обновление? (y/N)
+👤 Подними цену на TWS-PRO-001 до 2500 на Ozon
+🤖 Текущая цена: 1999 ₽ → Новая: 2500 ₽ (+25.06%)
+   Подтвердить? (y/N)
 
-👤 Какие товары заканчиваются?
-🤖 [Запускает mp-stocks list --low]
-   ⚠️ Товары с низкими остатками:
-   
-   📦 Умная колонка Home Mini (SKU: 789012)
-   Остаток: 8 шт — рекомендую пополнить!
-   ...
+👤 Какие товары заканчиваются на WB?
+🤖 [Запускает mp-stocks list --low --platform wb]
+   ⚠️ 2 товара с низкими остатками...
 ```
 
-### Утренний дайджест (автоматизация)
-
-Создайте скрипт для ежедневного отчёта:
-
-```bash
-#!/bin/bash
-# examples/morning-digest.sh
-
-echo "📊 Утренний отчёт Ozon ($(date '+%d.%m.%Y'))"
-echo ""
-
-echo "📦 Новые заказы:"
-mp-orders list | head -20
-
-echo ""
-echo "⚠️ Товары с низкими остатками:"
-mp-stocks list --low
-
-echo ""
-echo "✅ Отчёт готов!"
-```
-
-Запускайте через cron или OpenClaw heartbeat.
-
-## 🔧 Режим тестирования (Mock)
-
-Все команды поддерживают флаг `--mock` для тестирования без реального API:
-
-```bash
-mp-orders list --mock
-mp-prices get TWS-PRO-001 --mock
-mp-stocks list --low --mock
-```
-
-Mock данные основаны на реальной структуре Ozon API и полезны для:
-- Разработки и отладки
-- Обучения работе с системой
-- Тестирования интеграций
-
-## 🚨 Troubleshooting
-
-### Ошибка: `ERROR: Ozon credentials не настроены`
-
-**Решение:** Запустите `mp-setup` и введите Client ID и API Key.
-
-### Ошибка: `401 - Неверные API credentials`
-
-**Причины:**
-- Неправильный Client ID или API Key
-- API ключ был удалён или деактивирован
-
-**Решение:**
-1. Проверьте credentials в личном кабинете Ozon
-2. Создайте новый API ключ
-3. Запустите `mp-setup` и введите новые данные
-
-### Ошибка: `403 - Доступ запрещён`
-
-**Причина:** API ключ не имеет нужных прав.
-
-**Решение:**
-1. Зайдите в личный кабинет Ozon → Настройки → API ключи
-2. Создайте новый ключ с правами **Admin** или **Content + Analytics**
-3. Обновите credentials через `mp-setup`
-
-### Ошибка: `429 - Превышен лимит запросов`
-
-**Причина:** Слишком много запросов к API (rate limit).
-
-**Решение:**
-- Подождите 60 секунд и повторите
-- Система автоматически повторит запрос через некоторое время
-
-### Ошибка: `jq: command not found`
-
-**Решение:** Установите jq:
-```bash
-# Ubuntu/Debian
-sudo apt-get install jq
-
-# macOS
-brew install jq
-```
-
-## 📋 Audit Log
-
-Все изменения цен и остатков записываются в structured audit log:
-
-```
-~/.openclaw/marketplace/audit.log
-```
-
-**Формат:** `TIMESTAMP|USER|BATCH_ID|ACTION|SKU|OLD_VALUE|NEW_VALUE|STATUS`
-
-**Просмотр истории:**
-```bash
-mp-prices history                    # Последние 20 записей
-mp-prices history --sku TWS-PRO-001  # История SKU
-mp-prices history --last 50          # Последние 50 записей
-```
-
-**Ротация:** Записи старше 90 дней удаляются автоматически.
-
-## 🔄 Rollback
-
-Откат batch-операций по BATCH_ID из audit log:
-
-```bash
-mp-prices rollback --last            # Откатить последний batch
-mp-prices rollback 20260216-143022-a1b2c3d4  # По конкретному ID
-mp-stocks rollback --last --mock     # Тест в mock режиме
-```
-
-**Важно:**
-- Rollback всегда требует ручного подтверждения (`--yes` не работает)
-- Нельзя откатить batch с ошибками (все записи должны быть `success`)
-- Каждый rollback создаёт свой batch в audit log
-
-## 🚦 Batch Rate Limiting
+## Batch Rate Limiting
 
 Массовые операции автоматически разбиваются на чанки:
 
 - **Chunk size:** 10 (настраивается через `BATCH_SIZE`)
 - **Delay:** 1 секунда между чанками (`BATCH_DELAY`)
-- **429 handling:** Exponential backoff (5s → 15s → 30s)
-- **Progress:** `[30/100] Processing batch 3/10... ETA: 7s`
+- **Rate limit handling:** Exponential backoff (5s → 15s → 30s)
+- **Progress:** `[30/100] Обработано... ETA: 7s`
 
-## ⚠️ Known Limitations
+## Тестирование
 
-- Race condition detection — optimistic (two GET requests), не транзакционный lock
-- Rollback не поддерживает `--continue` после partial failure (в планах)
-- Batch execute пока доступен только как API (`batch_execute`), не из CLI
+```bash
+# Smoke tests (все платформы, mock режим)
+bash tests/smoke-test.sh
+```
 
-## 🔒 Безопасность
+Все 22 теста покрывают: заказы, цены, остатки для каждой платформы, платформо-специфичные особенности, обратную совместимость и help тексты.
 
-- **Credentials хранятся локально** в `~/.openclaw/marketplace/credentials.env`
-- **Права доступа 0600** — только владелец может читать файл
-- **Не коммитить в git** — `.gitignore` исключает credentials.env
+## Безопасность
+
+- **Credentials хранятся локально** в `~/.openclaw/marketplace/*.env` с правами 0600
+- **Валидация при загрузке** — credentials файлы проверяются на отсутствие shell-инъекций перед source
 - **Маскировка в логах** — API ключи никогда не логируются в открытом виде
+- **curl stderr подавлен** — ошибки curl не могут случайно утечь с токенами
+- **JSON через jq** — все JSON данные для API строятся через `jq -n`, исключая инъекции
+- **Audit log с flock** — атомарная запись и ротация через flock
+- **Не коммитить в git** — `.gitignore` исключает `*.env`, `logs/`, `*.log`
 
-## 📖 Документация API
+## Архитектура
 
-- [Ozon Seller API Documentation](https://docs.ozon.ru/api/seller/)
+```
+tools/                     # 5 CLI entry points
+  mp-setup                 # Настройка credentials
+  mp-test                  # Проверка подключения
+  mp-orders                # Управление заказами
+  mp-prices                # Управление ценами
+  mp-stocks                # Управление остатками
+
+lib/common/                # Общие модули
+  platform.sh              # Диспетчер платформ, валидация, загрузка credentials
+  logger.sh                # Логирование с маскировкой
+  http.sh                  # HTTP retry, batch executor
+  audit.sh                 # Audit log, rollback
+  formatter.sh             # JSON→текст, валидация цен, конвертация валют
+
+lib/ozon/                  # Ozon Seller API
+lib/wb/                    # Wildberries API
+lib/ymarket/               # Яндекс Маркет Partner API
+  auth.sh                  # Credentials: загрузка, сохранение, проверка
+  http.sh                  # HTTP клиент с platform-specific headers
+  orders.sh                # Заказы
+  prices.sh                # Цены
+  stocks.sh                # Остатки
+```
+
+Каждая платформа реализует одинаковый набор из 5 модулей. CLI tools используют диспетчер `platform.sh` для вызова нужной реализации.
+
+## Troubleshooting
+
+### Credentials не настроены
+
+```
+ERROR: Ozon credentials не настроены
+ERROR: WB API токен не настроен
+ERROR: Яндекс Маркет API ключ не настроен
+```
+
+**Решение:** `mp-setup --platform <ozon|wb|ymarket>`
+
+### 401 — Неверные credentials
+
+**Причины:** неправильный ключ, ключ деактивирован.
+**Решение:** создайте новый ключ в ЛК площадки и обновите через `mp-setup`.
+
+### 403 — Доступ запрещён
+
+**Причина:** ключ не имеет нужных прав/категорий.
+**Решение:**
+- **Ozon:** пересоздайте ключ с правами Admin или Content + Analytics
+- **WB:** проверьте что токен имеет нужные категории (Marketplace, Content, Analytics)
+- **YM:** проверьте scope токена (изменения вступают через ~10 минут)
+
+### 429 / 420 — Rate limit
+
+**Причина:** слишком много запросов.
+**Решение:** система автоматически повторяет запрос с exponential backoff. Если не помогает — подождите 60 секунд.
+
+> WB: код 409 считается за 10 запросов к лимиту.
+> YM: использует код 420 (не 429) для rate limit.
+
+### jq: command not found
+
+```bash
+brew install jq      # macOS
+sudo apt install jq  # Ubuntu/Debian
+```
+
+## Документация API
+
+- [Ozon Seller API](https://docs.ozon.ru/api/seller/)
+- [Wildberries API](https://openapi.wildberries.ru/)
+- [Яндекс Маркет Partner API](https://yandex.ru/dev/market/partner-api/)
 - [OpenClaw Documentation](https://docs.openclaw.ai/)
 
-## 🗺️ Roadmap
+## Roadmap
 
-- [x] **v0.1.0-mvp** — Заказы, цены, остатки (FBS)
-- [ ] **v0.2.0** — Финансовые отчёты, аналитика продаж
-- [ ] **v0.3.0** — Отзывы и ответы на отзывы
-- [ ] **v0.4.0** — FBO (Fulfillment by Ozon) поддержка
-- [ ] **v0.5.0** — Wildberries integration
+- [x] **v0.1.0** — Ozon MVP: заказы, цены, остатки (FBS)
+- [x] **v0.2.0** — Wildberries: заказы, цены, остатки, dual status
+- [x] **v0.3.0** — Яндекс Маркет: заказы, цены, остатки, карантин цен
+- [x] **v0.4.0** — Интеграция: audit log, rollback, smoke tests, мульти-платформа CLI
+- [x] **v0.5.0** — Security audit: safe credentials, jq JSON, bash 3.2 compat
+- [ ] **v0.6.0** — Финансовые отчёты, аналитика продаж
+- [ ] **v0.7.0** — Отзывы и ответы на отзывы
 - [ ] **v1.0.0** — Кросс-маркетплейс сравнение и аналитика
 
-## 🤝 Вклад в проект
+## Вклад в проект
 
-Contributions are welcome! Пожалуйста:
+Contributions are welcome!
+
 1. Fork репозиторий
 2. Создайте feature branch (`git checkout -b feature/amazing-feature`)
 3. Commit изменения (`git commit -m 'Add amazing feature'`)
 4. Push в branch (`git push origin feature/amazing-feature`)
 5. Создайте Pull Request
 
-## 📄 Лицензия
+## Лицензия
 
 MIT License — см. [LICENSE](LICENSE)
 
-## 👤 Автор
+## Автор
 
 **Alex** ([@smvlx](https://github.com/smvlx))
 
-- GitHub: https://github.com/smvlx
-- Email: alex@openclaw.ai
-
-## 🙏 Благодарности
+## Благодарности
 
 - [OpenClaw](https://openclaw.ai/) — AI platform
-- [Ozon](https://ozon.ru/) — маркетплейс
-- Community contributors
+- [Ozon](https://ozon.ru/), [Wildberries](https://wildberries.ru/), [Яндекс Маркет](https://market.yandex.ru/) — маркетплейсы
 
 ---
 
