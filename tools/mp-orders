@@ -90,19 +90,14 @@ cmd_list() {
         shift
     done
 
-    if [[ "$is_mock" == "false" ]]; then
-        case "$CURRENT_PLATFORM" in
-            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
-            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
-            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
-        esac
-    fi
+    [[ "$is_mock" == "false" ]] && { load_and_check_credentials || exit 1; }
 
     echo ""
     echo -e "${BLUE}📦 Заказы ${PLATFORM_NAME}${NC}"
     echo ""
 
-    local orders_json=$(_get_orders "${args[@]}")
+    local orders_json
+    orders_json=$(_get_orders "${args[@]}")
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить заказы${NC}" >&2 && exit 1
 
     _format_orders "$orders_json"
@@ -121,19 +116,14 @@ cmd_status() {
         args+=("$1"); shift
     done
 
-    if [[ "$is_mock" == "false" ]]; then
-        case "$CURRENT_PLATFORM" in
-            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
-            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
-            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
-        esac
-    fi
+    [[ "$is_mock" == "false" ]] && { load_and_check_credentials || exit 1; }
 
     echo ""
     echo -e "${BLUE}📋 Статус заказа (${PLATFORM_NAME})${NC}"
     echo ""
 
-    local status_json=$(_get_order_status "${args[@]}")
+    local status_json
+    status_json=$(_get_order_status "${args[@]}")
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить статус${NC}" >&2 && exit 1
 
     _format_order_status "$status_json"
@@ -149,19 +139,14 @@ cmd_stats() {
         args+=("$1"); shift
     done
 
-    if [[ "$is_mock" == "false" ]]; then
-        case "$CURRENT_PLATFORM" in
-            ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
-            wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
-            ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
-        esac
-    fi
+    [[ "$is_mock" == "false" ]] && { load_and_check_credentials || exit 1; }
 
     echo ""
     echo -e "${BLUE}📊 Статистика заказов (${PLATFORM_NAME})${NC}"
     echo ""
 
-    local stats_json=$(_get_orders_stats "${args[@]}")
+    local stats_json
+    stats_json=$(_get_orders_stats "${args[@]}")
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить статистику${NC}" >&2 && exit 1
 
     case "$CURRENT_PLATFORM" in

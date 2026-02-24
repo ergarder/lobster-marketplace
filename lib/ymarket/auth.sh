@@ -9,7 +9,10 @@ load_ym_credentials() {
     if [[ -f "$YM_CREDENTIALS_FILE" ]]; then
         local perms=$(stat -c %a "$YM_CREDENTIALS_FILE" 2>/dev/null || stat -f %A "$YM_CREDENTIALS_FILE" 2>/dev/null)
         [[ "$perms" != "600" ]] && chmod 600 "$YM_CREDENTIALS_FILE" 2>/dev/null
-        source "$YM_CREDENTIALS_FILE"
+        if ! safe_source_credentials "$YM_CREDENTIALS_FILE"; then
+            echo "ERROR: YM credentials файл повреждён или содержит небезопасные данные" >&2
+            return 1
+        fi
         return 0
     fi
     return 1
@@ -68,10 +71,13 @@ resolve_ym_ids() {
         export YM_BUSINESS_ID="$business_id"
         export YM_CAMPAIGN_ID="$campaign_id"
 
-        # Update credentials file
+        # Update credentials file (portable sed -i for both GNU and BSD)
         if [[ -f "$YM_CREDENTIALS_FILE" ]]; then
-            sed -i "s/^YM_BUSINESS_ID=.*/YM_BUSINESS_ID=$business_id/" "$YM_CREDENTIALS_FILE"
-            sed -i "s/^YM_CAMPAIGN_ID=.*/YM_CAMPAIGN_ID=$campaign_id/" "$YM_CREDENTIALS_FILE"
+            local tmp_cred="${YM_CREDENTIALS_FILE}.tmp"
+            sed "s/^YM_BUSINESS_ID=.*/YM_BUSINESS_ID=$business_id/" "$YM_CREDENTIALS_FILE" \
+                | sed "s/^YM_CAMPAIGN_ID=.*/YM_CAMPAIGN_ID=$campaign_id/" > "$tmp_cred" \
+                && mv "$tmp_cred" "$YM_CREDENTIALS_FILE"
+            chmod 600 "$YM_CREDENTIALS_FILE"
         fi
 
         echo "  Business ID: $business_id"

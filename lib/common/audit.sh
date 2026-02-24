@@ -12,17 +12,20 @@ AUDIT_LOCK="${AUDIT_DIR}/audit.lock"
 # Создаёт директории, ротирует логи старше 90 дней
 audit_init() {
     mkdir -p "$AUDIT_DIR"
-    
-    # Ротация: удалить записи старше 90 дней
+
+    # Ротация: удалить записи старше 90 дней (под flock для безопасности)
     if [[ -f "$AUDIT_LOG" ]]; then
-        local cutoff_date=$(date -d '90 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-90d '+%Y-%m-%d' 2>/dev/null)
-        if [[ -n "$cutoff_date" ]]; then
-            local tmp_file="${AUDIT_LOG}.tmp"
-            awk -F'|' -v cutoff="$cutoff_date" '{
-                split($1, dt, " ");
-                if (dt[1] >= cutoff) print
-            }' "$AUDIT_LOG" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$AUDIT_LOG"
-        fi
+        (
+            flock -x 200
+            local cutoff_date=$(date -d '90 days ago' '+%Y-%m-%d' 2>/dev/null || date -v-90d '+%Y-%m-%d' 2>/dev/null)
+            if [[ -n "$cutoff_date" ]]; then
+                local tmp_file="${AUDIT_LOG}.tmp"
+                awk -F'|' -v cutoff="$cutoff_date" '{
+                    split($1, dt, " ");
+                    if (dt[1] >= cutoff) print
+                }' "$AUDIT_LOG" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$AUDIT_LOG"
+            fi
+        ) 200>"$AUDIT_LOCK"
     fi
 }
 
@@ -92,28 +95,28 @@ audit_update_status() {
     (
         flock -x 200
         local tmp_file="${AUDIT_LOG}.tmp"
-        local updated=false
-        # Обновить ПОСЛЕДНЮЮ запись с данным batch_id + sku + status=pending
-        # Читаем файл в обратном порядке, обновляем первую найденную, потом обратно
-        tac "$AUDIT_LOG" | awk -F'|' -v bid="$batch_id" -v s="$sku" -v ns="$new_status" -v done=0 '{
-            nf = split($0, f, "|");
-            if (nf == 9) {
-                # New format with platform
-                if (done == 0 && f[4] == bid && f[6] == s && f[9] == "pending") {
-                    f[9] = ns;
-                    done = 1;
-                }
-                print f[1]"|"f[2]"|"f[3]"|"f[4]"|"f[5]"|"f[6]"|"f[7]"|"f[8]"|"f[9]
-            } else {
-                # Legacy 8-field format
-                if (done == 0 && f[3] == bid && f[5] == s && f[8] == "pending") {
-                    f[8] = ns;
-                    done = 1;
-                }
-                print f[1]"|"f[2]"|"f[3]"|"f[4]"|"f[5]"|"f[6]"|"f[7]"|"f[8]
-            }
-        }' | tac > "$tmp_file"
-        mv "$tmp_file" "$AUDIT_LOG"
+        # Update LAST matching entry: read all lines, find last match line number,
+        # then output with that single line modified (single-pass after finding line num)
+        local total_lines match_line
+        total_lines=$(wc -l < "$AUDIT_LOG")
+        # Find the last matching line number efficiently
+        match_line=$(awk -F'|' -v bid="$batch_id" -v s="$sku" '
+            (NF==9 && $4==bid && $6==s && $9=="pending") { ln=NR }
+            (NF==8 && $3==bid && $5==s && $8=="pending") { ln=NR }
+            END { print ln+0 }
+        ' "$AUDIT_LOG")
+
+        if [[ "$match_line" -gt 0 ]]; then
+            awk -F'|' -v ml="$match_line" -v ns="$new_status" 'NR==ml {
+                if (NF==9) { $9=ns }
+                else if (NF==8) { $8=ns }
+                out=""
+                for(i=1;i<=NF;i++) out=out (i>1?"|":"") $i
+                print out
+                next
+            } {print}' "$AUDIT_LOG" > "$tmp_file"
+            mv "$tmp_file" "$AUDIT_LOG"
+        fi
     ) 200>"$AUDIT_LOCK"
 }
 
@@ -162,12 +165,13 @@ audit_get_last_batch_id() {
         return 1
     fi
     
-    local cmd="grep \"|${user}|\" \"$AUDIT_LOG\""
-    [[ -n "$action_filter" ]] && cmd="$cmd | grep \"|${action_filter}|\""
+    local results
+    results=$(grep "|${user}|" "$AUDIT_LOG" 2>/dev/null) || return 1
+    [[ -n "$action_filter" ]] && results=$(echo "$results" | grep "|${action_filter}|")
     # Filter by platform (field 3 in 9-field format) to prevent cross-platform rollback
-    [[ -n "$platform_filter" ]] && cmd="$cmd | grep \"|${platform_filter}|\""
-    
-    eval "$cmd" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
+    [[ -n "$platform_filter" ]] && results=$(echo "$results" | grep "|${platform_filter}|")
+
+    echo "$results" | tail -1 | awk -F'|' '{if(NF==9) print $4; else print $3}'
 }
 
 # Rollback batch операции
@@ -375,14 +379,10 @@ audit_show_history() {
         "TIMESTAMP" "USER" "PLATFORM" "BATCH_ID" "ACTION" "SKU" "OLD" "NEW" "STATUS"
     echo "$(printf '%.0s-' {1..130})"
 
-    echo "$records" | while IFS='|' read -r line; do
-        local nf=$(echo "$line" | awk -F'|' '{print NF}')
-        if [[ "$nf" == "9" ]]; then
-            echo "$line" | awk -F'|' '{printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9}'
-        else
-            echo "$line" | awk -F'|' '{printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,"ozon",$3,$4,$5,$6,$7,$8}'
-        fi
-    done
+    echo "$records" | awk -F'|' '{
+        if (NF==9) printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,$3,$4,$5,$6,$7,$8,$9
+        else       printf "%-19s %-8s %-8s %-25s %-15s %-20s %-10s → %-10s %s\n", $1,$2,"ozon",$3,$4,$5,$6,$7,$8
+    }'
 }
 
 # Инициализация при загрузке модуля

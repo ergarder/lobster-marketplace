@@ -21,8 +21,11 @@ load_credentials() {
             chmod 600 "$CREDENTIALS_FILE" 2>/dev/null
         fi
         
-        # Загрузить переменные окружения
-        source "$CREDENTIALS_FILE"
+        # Загрузить переменные окружения (с валидацией содержимого)
+        if ! safe_source_credentials "$CREDENTIALS_FILE"; then
+            echo "ERROR: Credentials файл повреждён или содержит небезопасные данные" >&2
+            return 1
+        fi
         
         log_debug "Credentials loaded from $CREDENTIALS_FILE"
         return 0

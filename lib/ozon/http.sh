@@ -24,7 +24,7 @@ ozon_request() {
             -H "Client-Id: $OZON_CLIENT_ID" \
             -H "Api-Key: $OZON_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$data" 2>&1)
+            -d "$data" 2>/dev/null)
 
         local http_code=$(echo "$response" | tail -n1)
         local body=$(echo "$response" | sed '$d')

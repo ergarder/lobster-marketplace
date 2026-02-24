@@ -43,13 +43,7 @@ show_help() {
 EOF
 }
 
-_load_creds() {
-    case "$CURRENT_PLATFORM" in
-        ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
-        wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
-        ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
-    esac
-}
+_load_creds() { load_and_check_credentials || exit 1; }
 
 _get_stocks() {
     case "$CURRENT_PLATFORM" in
@@ -124,12 +118,10 @@ cmd_list() {
 
     local stocks_json
     if [[ "$show_low" == "true" ]] && [[ "$CURRENT_PLATFORM" == "ozon" ]]; then
-        stocks_json=$(check_low_stocks "${args[@]}")
+        stocks_json=$(check_low_stocks "${args[@]}") || { echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2; exit 1; }
     else
-        stocks_json=$(_get_stocks "${args[@]}")
+        stocks_json=$(_get_stocks "${args[@]}") || { echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2; exit 1; }
     fi
-
-    [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить остатки${NC}" >&2 && exit 1
 
     _format_stocks "$stocks_json" "$show_low" "$threshold"
     echo ""

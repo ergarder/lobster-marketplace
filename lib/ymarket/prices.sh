@@ -42,7 +42,7 @@ MOCK_EOF
     fi
 
     local body="{}"
-    [[ -n "$sku" ]] && body="{\"offerIds\":[\"$sku\"]}"
+    [[ -n "$sku" ]] && body=$(jq -n --arg sku "$sku" '{offerIds:[$sku]}')
 
     ymarket_request "POST" "/v2/businesses/{businessId}/offer-prices" "$body" "business"
 }
@@ -83,20 +83,9 @@ EOF
     fi
 
     # Note: YM uses RUR, not RUB
-    local data=$(cat <<EOF
-{
-  "offers": [
-    {
-      "offerId": "$sku",
-      "price": {
-        "value": $new_price,
-        "currencyId": "RUR"
-      }
-    }
-  ]
-}
-EOF
-)
+    local data
+    data=$(jq -n --arg sku "$sku" --argjson price "$new_price" \
+        '{offers:[{offerId:$sku,price:{value:$price,currencyId:"RUR"}}]}')
 
     local response
     response=$(ymarket_request "POST" "/v2/businesses/{businessId}/offer-prices/updates" "$data" "business")
@@ -141,7 +130,7 @@ MOCK_EOF
     fi
 
     local body="{}"
-    [[ -n "$sku" ]] && body="{\"offerIds\":[\"$sku\"]}"
+    [[ -n "$sku" ]] && body=$(jq -n --arg sku "$sku" '{offerIds:[$sku]}')
 
     ymarket_request "POST" "/v2/businesses/{businessId}/price-quarantine" "$body" "business"
 }
@@ -167,6 +156,7 @@ ym_confirm_quarantine() {
 
     [[ "$offer_ids" == "[]" ]] || [[ -z "$offer_ids" ]] && echo "Нет цен в карантине" && return 0
 
-    local data="{\"offerIds\":$offer_ids}"
+    local data
+    data=$(jq -n --argjson ids "$offer_ids" '{offerIds:$ids}')
     ymarket_request "POST" "/v2/businesses/{businessId}/price-quarantine/confirm" "$data" "business"
 }

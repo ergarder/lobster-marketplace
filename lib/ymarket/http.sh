@@ -50,7 +50,7 @@ ymarket_request() {
             curl_args+=(-d "$data")
         fi
 
-        local response=$(curl "${curl_args[@]}" 2>&1)
+        local response=$(curl "${curl_args[@]}" 2>/dev/null)
         local http_code=$(echo "$response" | tail -n1)
         local body=$(echo "$response" | sed '$d')
 

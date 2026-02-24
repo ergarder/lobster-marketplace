@@ -23,6 +23,9 @@ get_orders() {
                 shift 2
                 ;;
             --limit)
+                if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                    echo "ERROR: --limit должен быть числом: $2" >&2; return 1
+                fi
                 limit="$2"
                 shift 2
                 ;;
@@ -31,7 +34,7 @@ get_orders() {
                 ;;
         esac
     done
-    
+
     log_debug "get_orders called with status=$status limit=$limit mock=$mock_mode"
     
     # Mock режим
@@ -109,20 +112,17 @@ EOF
     fi
     
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "filter": {
-    "status": "$status"
-  },
-  "limit": $limit,
-  "with": {
-    "analytics_data": true,
-    "financial_data": false
-  }
-}
-EOF
-)
-    
+    local request_data
+    if [[ "$status" == "all" ]]; then
+        request_data=$(jq -n --argjson limit "$limit" \
+            '{filter:{},limit:$limit,with:{analytics_data:true,financial_data:false}}')
+    else
+        request_data=$(jq -n \
+            --arg status "$status" \
+            --argjson limit "$limit" \
+            '{filter:{status:$status},limit:$limit,with:{analytics_data:true,financial_data:false}}')
+    fi
+
     ozon_request "POST" "/v3/posting/fbs/list" "$request_data"
 }
 
@@ -192,17 +192,10 @@ EOF
     fi
     
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "posting_number": "$posting_number",
-  "with": {
-    "analytics_data": true,
-    "financial_data": true
-  }
-}
-EOF
-)
-    
+    local request_data
+    request_data=$(jq -n --arg pn "$posting_number" \
+        '{posting_number:$pn,with:{analytics_data:true,financial_data:true}}')
+
     ozon_request "POST" "/v3/posting/fbs/get" "$request_data"
 }
 
@@ -226,8 +219,8 @@ get_orders_stats() {
     
     log_debug "get_orders_stats called with mock=$mock_mode"
     
-    # Получить заказы
-    local orders_json=$(get_orders ${mock_mode:+--mock})
+    # Получить заказы (mock возвращает все статусы; production тоже без фильтра)
+    local orders_json=$(get_orders --status all ${mock_mode:+--mock})
     
     if [[ -z "$orders_json" ]]; then
         echo "ERROR: Не удалось получить данные о заказах" >&2

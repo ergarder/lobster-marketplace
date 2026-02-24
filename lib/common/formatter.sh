@@ -308,6 +308,35 @@ format_number() {
     printf "%'d" "$number" 2>/dev/null || echo "$number"
 }
 
+# Валидировать изменение цены (не более ±50%)
+# Args:
+#   $1 - старая цена
+#   $2 - новая цена
+# Returns: 0 если валидно, 1 если изменение слишком большое
+validate_price_change() {
+    local old_price=$1
+    local new_price=$2
+    local max_change_percent=50
+
+    if [[ -z "$old_price" ]] || [[ -z "$new_price" ]]; then
+        echo "ERROR: Обе цены обязательны для валидации" >&2
+        return 1
+    fi
+
+    # Вычислить процент изменения используя awk
+    local change_percent=$(awk -v old="$old_price" -v new="$new_price" 'BEGIN {printf "%.2f", ((new - old) / old) * 100}')
+    local abs_change=$(echo "$change_percent" | tr -d '-')
+
+    # Проверить лимит
+    if (( $(awk -v abs="$abs_change" -v max="$max_change_percent" 'BEGIN {print (abs > max)}') )); then
+        echo "WARNING: Изменение цены слишком большое: ${change_percent}%" >&2
+        echo "Допустимый диапазон: ±${max_change_percent}%" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 # Вычислить процент изменения
 # Args: $1 - старая цена, $2 - новая цена
 # Test: calculate_change_percent 100 150 → "+50.00%"

@@ -73,6 +73,49 @@ source_platform_libs() {
     done
 }
 
+# Проверить что значение является положительным целым числом
+# Args: $1 - value, $2 - parameter name (for error message)
+validate_positive_int() {
+    local val="$1"
+    local name="${2:-parameter}"
+    if ! [[ "$val" =~ ^[0-9]+$ ]] || [[ "$val" == "0" ]]; then
+        echo "ERROR: $name должен быть положительным числом, получено: $val" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Безопасная загрузка credentials: проверяем что файл содержит только KEY=value и комментарии
+# Args: $1 - путь к файлу
+safe_source_credentials() {
+    local cred_file="$1"
+    if [[ ! -f "$cred_file" ]]; then
+        return 1
+    fi
+    # Reject files containing shell metacharacters or commands
+    # Allow only: empty lines, comments (#...), KEY=value (no semicolons, backticks, $() etc.)
+    local bad_lines
+    bad_lines=$(grep -nvE '^[[:space:]]*(#.*)?$|^[A-Za-z_][A-Za-z0-9_]*=[^;`$()&|<>]*$' "$cred_file" 2>/dev/null)
+    if [[ -n "$bad_lines" ]]; then
+        echo "ERROR: Credentials файл содержит небезопасные строки:" >&2
+        echo "$bad_lines" >&2
+        echo "Допустимый формат: KEY=value (без спецсимволов shell)" >&2
+        return 1
+    fi
+    source "$cred_file"
+}
+
+# Загрузить и проверить credentials текущей платформы
+# Returns: 0 если успешно, 1 если ошибка (с сообщением)
+load_and_check_credentials() {
+    case "${CURRENT_PLATFORM:-ozon}" in
+        ozon)    load_credentials && check_ozon_credentials ;;
+        wb)      load_wb_credentials && check_wb_credentials ;;
+        ymarket) load_ym_credentials && check_ym_credentials ;;
+        *)       echo "ERROR: Unknown platform: $CURRENT_PLATFORM" >&2; return 1 ;;
+    esac
+}
+
 # Получить человеческое имя платформы
 platform_display_name() {
     case "${1:-$CURRENT_PLATFORM}" in

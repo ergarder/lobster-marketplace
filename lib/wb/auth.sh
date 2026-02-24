@@ -10,7 +10,10 @@ load_wb_credentials() {
         if [[ "$perms" != "600" ]]; then
             chmod 600 "$WB_CREDENTIALS_FILE" 2>/dev/null
         fi
-        source "$WB_CREDENTIALS_FILE"
+        if ! safe_source_credentials "$WB_CREDENTIALS_FILE"; then
+            echo "ERROR: WB credentials файл повреждён или содержит небезопасные данные" >&2
+            return 1
+        fi
         return 0
     fi
     return 1

@@ -83,9 +83,12 @@ MOCK_EOF
         return 0
     fi
 
-    local body="{\"limit\":$limit"
-    [[ -n "$status" ]] && body="${body},\"statuses\":[\"$status\"]"
-    body="${body}}"
+    local body
+    if [[ -n "$status" ]]; then
+        body=$(jq -n --argjson limit "$limit" --arg s "$status" '{limit:$limit,statuses:[$s]}')
+    else
+        body=$(jq -n --argjson limit "$limit" '{limit:$limit}')
+    fi
 
     ymarket_request "POST" "/v1/businesses/{businessId}/orders" "$body" "business"
 }

@@ -57,16 +57,9 @@ EOF
     fi
     
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "filter": {
-    "offer_id": ["$sku"],
-    "visibility": "ALL"
-  }
-}
-EOF
-)
-    
+    local request_data
+    request_data=$(jq -n --arg sku "$sku" '{filter:{offer_id:[$sku],visibility:"ALL"}}')
+
     ozon_request "POST" "/v4/product/info/prices" "$request_data"
 }
 
@@ -155,27 +148,18 @@ EOF
     fi
     
     # Подготовка данных для обновления
-    local price_data=$(cat <<EOF
-{
-  "offer_id": "$sku",
-  "price": "$new_price"
-EOF
-)
-    
-    # Добавить old_price если указан
+    local price_data
     if [[ -n "$old_price" ]]; then
-        price_data="${price_data}, \"old_price\": \"$old_price\""
+        price_data=$(jq -n --arg sku "$sku" --arg price "$new_price" --arg old "$old_price" \
+            '{offer_id:$sku,price:$price,old_price:$old}')
+    else
+        price_data=$(jq -n --arg sku "$sku" --arg price "$new_price" \
+            '{offer_id:$sku,price:$price}')
     fi
-    
-    price_data="${price_data}}"
-    
+
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "prices": [$price_data]
-}
-EOF
-)
+    local request_data
+    request_data=$(jq -n --argjson pd "$price_data" '{prices:[$pd]}')
     
     local response
     response=$(ozon_request "POST" "/v1/product/import/prices" "$request_data")
@@ -194,34 +178,7 @@ EOF
     return $result
 }
 
-# Валидировать изменение цены (не более ±50%)
-# Args:
-#   $1 - старая цена
-#   $2 - новая цена
-# Returns: 0 если валидно, 1 если изменение слишком большое
-validate_price_change() {
-    local old_price=$1
-    local new_price=$2
-    local max_change_percent=50
-    
-    if [[ -z "$old_price" ]] || [[ -z "$new_price" ]]; then
-        echo "ERROR: Обе цены обязательны для валидации" >&2
-        return 1
-    fi
-    
-    # Вычислить процент изменения используя awk
-    local change_percent=$(awk -v old="$old_price" -v new="$new_price" 'BEGIN {printf "%.2f", ((new - old) / old) * 100}')
-    local abs_change=$(echo "$change_percent" | tr -d '-')
-    
-    # Проверить лимит
-    if (( $(awk -v abs="$abs_change" -v max="$max_change_percent" 'BEGIN {print (abs > max)}') )); then
-        echo "WARNING: Изменение цены слишком большое: ${change_percent}%" >&2
-        echo "Допустимый диапазон: ±${max_change_percent}%" >&2
-        return 1
-    fi
-    
-    return 0
-}
+# validate_price_change moved to lib/common/formatter.sh (available for all platforms)
 
 # Получить массовые цены товаров
 # Args:
@@ -238,6 +195,9 @@ get_prices_bulk() {
                 shift
                 ;;
             --limit)
+                if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                    echo "ERROR: --limit должен быть числом: $2" >&2; return 1
+                fi
                 limit="$2"
                 shift 2
                 ;;
@@ -246,7 +206,7 @@ get_prices_bulk() {
                 ;;
         esac
     done
-    
+
     log_debug "get_prices_bulk called with limit=$limit mock=$mock_mode"
     
     # Mock режим
@@ -290,15 +250,8 @@ EOF
     fi
     
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "filter": {
-    "visibility": "ALL"
-  },
-  "limit": $limit
-}
-EOF
-)
-    
+    local request_data
+    request_data=$(jq -n --argjson limit "$limit" '{filter:{visibility:"ALL"},limit:$limit}')
+
     ozon_request "POST" "/v4/product/info/prices" "$request_data"
 }

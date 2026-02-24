@@ -2,22 +2,19 @@
 # Wildberries HTTP клиент
 # Особенности: multiple base URLs, Authorization header, 409=10x penalty
 
-# Require bash 4+ for associative arrays (declare -A)
-if (( BASH_VERSINFO[0] < 4 )); then
-    echo "ERROR: lib/wb/http.sh requires bash 4+ (found ${BASH_VERSION}). Associative arrays not supported." >&2
-    return 1 2>/dev/null || exit 1
-fi
-
-# Base URLs per API category
-declare -A WB_API_HOSTS=(
-    [content]="content-api.wildberries.ru"
-    [marketplace]="marketplace-api.wildberries.ru"
-    [statistics]="statistics-api.wildberries.ru"
-    [analytics]="seller-analytics-api.wildberries.ru"
-    [advert]="advert-api.wildberries.ru"
-    [feedbacks]="feedbacks-api.wildberries.ru"
-    [prices]="discounts-prices-api.wildberries.ru"
-)
+# Base URLs per API category (bash 3.2 compatible — no associative arrays)
+_wb_host_for_category() {
+    case "${1:-marketplace}" in
+        content)    echo "content-api.wildberries.ru" ;;
+        marketplace) echo "marketplace-api.wildberries.ru" ;;
+        statistics) echo "statistics-api.wildberries.ru" ;;
+        analytics)  echo "seller-analytics-api.wildberries.ru" ;;
+        advert)     echo "advert-api.wildberries.ru" ;;
+        feedbacks)  echo "feedbacks-api.wildberries.ru" ;;
+        prices)     echo "discounts-prices-api.wildberries.ru" ;;
+        *)          echo "marketplace-api.wildberries.ru" ;;
+    esac
+}
 
 # Выполнить HTTP запрос к WB API
 # Args:
@@ -32,17 +29,20 @@ wb_request() {
     local category=${4:-marketplace}
     local attempt=1
 
-    # Apply host overrides from wb.env (loaded after http.sh is sourced)
-    [[ -n "${WB_HOST_CONTENT:-}" ]] && WB_API_HOSTS[content]="$WB_HOST_CONTENT"
-    [[ -n "${WB_HOST_MARKETPLACE:-}" ]] && WB_API_HOSTS[marketplace]="$WB_HOST_MARKETPLACE"
-    [[ -n "${WB_HOST_PRICES:-}" ]] && WB_API_HOSTS[prices]="$WB_HOST_PRICES"
-
     if [[ -z "$WB_API_TOKEN" ]]; then
         echo "ERROR: WB API токен не настроен. Запустите: mp-setup --platform wb" >&2
         return 1
     fi
 
-    local host="${WB_API_HOSTS[$category]:-${WB_API_HOSTS[marketplace]}}"
+    # Get host for category, with env overrides
+    local host
+    host=$(_wb_host_for_category "$category")
+    # Apply host overrides from wb.env
+    case "$category" in
+        content)     [[ -n "${WB_HOST_CONTENT:-}" ]] && host="$WB_HOST_CONTENT" ;;
+        marketplace) [[ -n "${WB_HOST_MARKETPLACE:-}" ]] && host="$WB_HOST_MARKETPLACE" ;;
+        prices)      [[ -n "${WB_HOST_PRICES:-}" ]] && host="$WB_HOST_PRICES" ;;
+    esac
     local base_url="https://${host}"
 
     while [ $attempt -le $MAX_RETRIES ]; do
@@ -57,7 +57,7 @@ wb_request() {
             curl_args+=(-d "$data")
         fi
 
-        local response=$(curl "${curl_args[@]}" 2>&1)
+        local response=$(curl "${curl_args[@]}" 2>/dev/null)
         local http_code=$(echo "$response" | tail -n1)
         local body=$(echo "$response" | sed '$d')
 

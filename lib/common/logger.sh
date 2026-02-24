@@ -18,8 +18,8 @@ CURRENT_LOG_LEVEL=${CURRENT_LOG_LEVEL:-$LOG_LEVEL_INFO}
 init_logger() {
     mkdir -p "$LOG_DIR"
     
-    # Ротация старых логов (удалить логи старше 30 дней)
-    find "$LOG_DIR" -name "marketplace-*.log" -mtime +30 -delete 2>/dev/null
+    # Ротация старых логов (удалить логи старше 30 дней, portable)
+    find "$LOG_DIR" -name "marketplace-*.log" -mtime +30 -exec rm -f {} + 2>/dev/null
 }
 
 # Записать сообщение в лог

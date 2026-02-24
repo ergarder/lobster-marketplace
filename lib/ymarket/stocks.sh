@@ -83,23 +83,11 @@ EOF
     fi
 
     # Note: items array must have exactly 1 element
-    local updated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    local data=$(cat <<EOF
-{
-  "skus": [
-    {
-      "sku": "$sku",
-      "items": [
-        {
-          "count": $new_quantity,
-          "updatedAt": "$updated_at"
-        }
-      ]
-    }
-  ]
-}
-EOF
-)
+    local updated_at
+    updated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    local data
+    data=$(jq -n --arg sku "$sku" --argjson qty "$new_quantity" --arg ts "$updated_at" \
+        '{skus:[{sku:$sku,items:[{count:$qty,updatedAt:$ts}]}]}')
 
     local response
     response=$(ymarket_request "PUT" "/v2/campaigns/{campaignId}/offers/stocks" "$data" "campaign")

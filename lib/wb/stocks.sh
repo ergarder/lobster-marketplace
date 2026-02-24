@@ -148,7 +148,8 @@ EOF
     local wh_id=$(_wb_resolve_warehouse "$warehouse_id" "$mock_mode")
     [[ $? -ne 0 ]] && return 1
 
-    local data="{\"stocks\":[{\"sku\":\"$sku\",\"amount\":$new_quantity}]}"
+    local data
+    data=$(jq -n --arg sku "$sku" --argjson qty "$new_quantity" '{stocks:[{sku:$sku,amount:$qty}]}')
     local response
     response=$(wb_request "PUT" "/api/v3/stocks/${wh_id}" "$data" "marketplace")
     local result=$?

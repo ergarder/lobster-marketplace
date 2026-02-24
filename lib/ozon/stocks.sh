@@ -29,6 +29,9 @@ get_stocks() {
                 shift 2
                 ;;
             --limit)
+                if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                    echo "ERROR: --limit должен быть числом: $2" >&2; return 1
+                fi
                 limit="$2"
                 shift 2
                 ;;
@@ -37,7 +40,7 @@ get_stocks() {
                 ;;
         esac
     done
-    
+
     log_debug "get_stocks called with low=$low_stocks_only warehouse=$warehouse_id limit=$limit mock=$mock_mode"
     
     # Mock режим
@@ -99,21 +102,14 @@ EOF
     fi
     
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "limit": $limit,
-  "filter": {
-    "visibility": "ALL"
-  }
-}
-EOF
-)
-    
-    # Добавить фильтр по складу если указан
+    local request_data
     if [[ -n "$warehouse_id" ]]; then
-        request_data=$(echo "$request_data" | jq --arg wh "$warehouse_id" '.filter.warehouse_id = $wh')
+        request_data=$(jq -n --argjson limit "$limit" --arg wh "$warehouse_id" \
+            '{limit:$limit,filter:{visibility:"ALL",warehouse_id:$wh}}')
+    else
+        request_data=$(jq -n --argjson limit "$limit" '{limit:$limit,filter:{visibility:"ALL"}}')
     fi
-    
+
     ozon_request "POST" "/v3/product/info/stocks" "$request_data"
 }
 
@@ -211,27 +207,18 @@ EOF
     fi
     
     # Подготовка данных для обновления
-    local stock_data=$(cat <<EOF
-{
-  "offer_id": "$sku",
-  "stock": $new_quantity
-EOF
-)
-    
-    # Добавить warehouse_id если указан
+    local stock_data
     if [[ -n "$warehouse_id" ]]; then
-        stock_data="${stock_data}, \"warehouse_id\": $warehouse_id"
+        stock_data=$(jq -n --arg sku "$sku" --argjson qty "$new_quantity" --argjson wh "$warehouse_id" \
+            '{offer_id:$sku,stock:$qty,warehouse_id:$wh}')
+    else
+        stock_data=$(jq -n --arg sku "$sku" --argjson qty "$new_quantity" \
+            '{offer_id:$sku,stock:$qty}')
     fi
-    
-    stock_data="${stock_data}}"
-    
+
     # Реальный API запрос
-    local request_data=$(cat <<EOF
-{
-  "stocks": [$stock_data]
-}
-EOF
-)
+    local request_data
+    request_data=$(jq -n --argjson sd "$stock_data" '{stocks:[$sd]}')
     
     local response
     response=$(ozon_request "POST" "/v1/product/import/stocks" "$request_data")
@@ -305,6 +292,9 @@ check_low_stocks() {
                 shift
                 ;;
             --threshold)
+                if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                    echo "ERROR: --threshold должен быть числом: $2" >&2; return 1
+                fi
                 threshold="$2"
                 shift 2
                 ;;
@@ -313,7 +303,7 @@ check_low_stocks() {
                 ;;
         esac
     done
-    
+
     log_debug "check_low_stocks called with threshold=$threshold mock=$mock_mode"
     
     # Получить все остатки

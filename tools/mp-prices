@@ -44,13 +44,7 @@ show_help() {
 EOF
 }
 
-_load_creds() {
-    case "$CURRENT_PLATFORM" in
-        ozon)    load_credentials; check_ozon_credentials || exit 1 ;;
-        wb)      load_wb_credentials; check_wb_credentials || exit 1 ;;
-        ymarket) load_ym_credentials; check_ym_credentials || exit 1 ;;
-    esac
-}
+_load_creds() { load_and_check_credentials || exit 1; }
 
 _get_price() {
     case "$CURRENT_PLATFORM" in
@@ -111,7 +105,8 @@ cmd_get() {
     echo -e "${BLUE}💰 Цена товара (${PLATFORM_NAME})${NC}"
     echo ""
 
-    local price_json=$(_get_price "${args[@]}")
+    local price_json
+    price_json=$(_get_price "${args[@]}")
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить цену${NC}" >&2 && exit 1
 
     _format_price "$price_json"
@@ -240,7 +235,8 @@ cmd_list() {
     echo -e "${BLUE}💰 Цены товаров (${PLATFORM_NAME})${NC}"
     echo ""
 
-    local prices_json=$(_get_prices_bulk "${args[@]}")
+    local prices_json
+    prices_json=$(_get_prices_bulk "${args[@]}")
     [[ $? -ne 0 ]] && echo -e "${RED}ERROR: Не удалось получить цены${NC}" >&2 && exit 1
 
     case "$CURRENT_PLATFORM" in

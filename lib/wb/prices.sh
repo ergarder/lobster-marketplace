@@ -112,17 +112,9 @@ EOF
         return 0
     fi
 
-    local data=$(cat <<EOF
-{
-  "data": [
-    {
-      "nmID": $sku,
-      "price": $new_price_kopecks
-    }
-  ]
-}
-EOF
-)
+    local data
+    data=$(jq -n --argjson sku "$sku" --argjson price "$new_price_kopecks" \
+        '{data:[{nmID:$sku,price:$price}]}')
 
     local response
     response=$(wb_request "POST" "/api/v2/upload/task/size" "$data" "prices")
