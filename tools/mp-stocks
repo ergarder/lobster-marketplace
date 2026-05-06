@@ -74,7 +74,7 @@ _format_stocks() {
     local show_low="${2:-false}"
     local threshold="${3:-10}"
     case "$CURRENT_PLATFORM" in
-        ozon)    format_stocks "$json" "$show_low" ;;
+        ozon)    format_stocks "$json" "$show_low" "$threshold" ;;
         wb)
             if [[ "$show_low" == "true" ]]; then
                 json=$(echo "$json" | jq --argjson t "$threshold" '

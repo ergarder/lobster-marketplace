@@ -110,7 +110,7 @@ EOF
         request_data=$(jq -n --argjson limit "$limit" '{limit:$limit,filter:{visibility:"ALL"}}')
     fi
 
-    ozon_request "POST" "/v3/product/info/stocks" "$request_data"
+    ozon_request "POST" "/v4/product/info/stocks" "$request_data"
 }
 
 # Обновить остаток товара
@@ -263,18 +263,32 @@ get_stock_by_sku() {
         return 1
     fi
     
-    # Получить все остатки и отфильтровать нужный
     local args=()
     [[ "$mock_mode" == "true" ]] && args+=("--mock")
     
-    local stocks_json=$(get_stocks "${args[@]}")
+    local stocks_json
+    stocks_json=$(get_stocks "${args[@]}") || return 1
     
-    # Отфильтровать по SKU/offer_id (SKU может быть числом или строкой)
-    echo "$stocks_json" | jq --arg sku "$sku" '.result.rows[] | 
-        select(
-            (.sku | tostring) == $sku or 
-            .offer_id == $sku
-        )'
+    if [[ "$mock_mode" == "true" ]]; then
+        echo "$stocks_json" | jq --arg sku "$sku" '.result.rows[] | select(.offer_id == $sku or (.sku|tostring) == $sku)'
+        return 0
+    fi
+    
+    echo "$stocks_json" | jq --arg sku "$sku" '
+        .items[]
+        | select(.offer_id == $sku or (.product_id|tostring) == $sku)
+        | . as $item
+        | (([.stocks[]? | select(.type=="fbo") | .present] | add) // 0) as $present
+        | (([.stocks[]? | select(.type=="fbo") | .reserved] | add) // 0) as $reserved
+        | {
+            sku: $item.offer_id,
+            offer_id: $item.offer_id,
+            product_id: $item.product_id,
+            stock: $present,
+            reserved: $reserved,
+            type: "fbo"
+        }
+    '
 }
 
 # Проверить товары с низкими остатками
@@ -282,20 +296,27 @@ get_stock_by_sku() {
 #   --mock - использовать mock данные
 #   --threshold <num> - порог низкого остатка (по умолчанию 10)
 check_low_stocks() {
-    local mock_mode=false
     local threshold=10
+    local mock_mode=false
+    local args=()
     
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --threshold)
+                threshold="$2"
+                shift 2
+                ;;
             --mock)
                 mock_mode=true
+                args+=("--mock")
                 shift
                 ;;
-            --threshold)
-                if ! [[ "$2" =~ ^[0-9]+$ ]]; then
-                    echo "ERROR: --threshold должен быть числом: $2" >&2; return 1
-                fi
-                threshold="$2"
+            --limit)
+                args+=("$1" "$2")
+                shift 2
+                ;;
+            --warehouse)
+                args+=("$1" "$2")
                 shift 2
                 ;;
             *)
@@ -303,19 +324,35 @@ check_low_stocks() {
                 ;;
         esac
     done
-
+    
     log_debug "check_low_stocks called with threshold=$threshold mock=$mock_mode"
     
-    # Получить все остатки
-    local args=()
-    [[ "$mock_mode" == "true" ]] && args+=("--mock")
+    local stocks_json
+    stocks_json=$(get_stocks "${args[@]}") || return 1
     
-    local stocks_json=$(get_stocks "${args[@]}")
+    if [[ "$mock_mode" == "true" ]]; then
+        echo "$stocks_json" | jq --argjson thresh "$threshold" '{
+            result: {
+                rows: [.result.rows[] | select(.stock < $thresh)]
+            }
+        }'
+        return 0
+    fi
     
-    # Отфильтровать товары с низкими остатками
     echo "$stocks_json" | jq --argjson thresh "$threshold" '{
-        result: {
-            rows: [.result.rows[] | select(.stock < $thresh)]
-        }
+        items: [
+            .items[]
+            | . as $item
+            | (([.stocks[]? | select(.type=="fbo") | .present] | add) // 0) as $present
+            | select($present < $thresh)
+        ],
+        total: (
+            [
+                .items[]
+                | (([.stocks[]? | select(.type=="fbo") | .present] | add) // 0) as $present
+                | select($present < $thresh)
+            ] | length
+        ),
+        cursor: (.cursor // "")
     }'
 }

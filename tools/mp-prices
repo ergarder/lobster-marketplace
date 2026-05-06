@@ -82,7 +82,7 @@ _format_price() {
 _extract_price_value() {
     local json=$1
     case "$CURRENT_PLATFORM" in
-        ozon)    echo "$json" | jq -r '.result.items[0].price.price // "0"' ;;
+        ozon)    echo "$json" | jq -r '.items[0].price.price // "0"' ;;
         wb)      echo "$json" | jq -r '(.data.listGoods[0].sizes[0].price // 0) / 100' ;;
         ymarket) echo "$json" | jq -r '.result.offers[0].price.value // "0"' ;;
     esac
@@ -241,7 +241,13 @@ cmd_list() {
 
     case "$CURRENT_PLATFORM" in
         ozon)
-            echo "$prices_json" | jq -r '.result.items[] | "SKU: \(.offer_id)\n💰 Цена: \(.price.price) ₽\n---"'
+            echo "$prices_json" | jq -r '.items[] | "SKU: \(.offer_id)
+Product ID: \(.product_id)
+💰 Цена продавца: \(.price.price) ₽
+🏷 Цена акции продавца: \(.price.marketing_seller_price) ₽
+📉 Мин. цена: \(.price.min_price) ₽
+💸 Комиссия FBO: \(.commissions.sales_percent_fbo)%
+---"'
             ;;
         wb)
             echo "$prices_json" | jq -r '.data.listGoods[] | "Артикул: \(.nmID)\n💰 Цена: \(.sizes[0].price / 100) ₽\n---"'

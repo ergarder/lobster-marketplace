@@ -58,9 +58,9 @@ EOF
     
     # Реальный API запрос
     local request_data
-    request_data=$(jq -n --arg sku "$sku" '{filter:{offer_id:[$sku],visibility:"ALL"}}')
+    request_data=$(jq -n --arg sku "$sku" '{filter:{offer_id:[$sku],visibility:"ALL"},limit:1}')
 
-    ozon_request "POST" "/v4/product/info/prices" "$request_data"
+    ozon_request "POST" "/v5/product/info/prices" "$request_data"
 }
 
 # Обновить цену товара
@@ -253,5 +253,5 @@ EOF
     local request_data
     request_data=$(jq -n --argjson limit "$limit" '{filter:{visibility:"ALL"},limit:$limit}')
 
-    ozon_request "POST" "/v4/product/info/prices" "$request_data"
+    ozon_request "POST" "/v5/product/info/prices" "$request_data"
 }

@@ -230,12 +230,14 @@ format_order_status() {
 format_price() {
     local json=$1
     
-    echo "$json" | jq -r '.result.items[0] | 
+    echo "$json" | jq -r '.items[0] | 
 "SKU: \(.offer_id)
-💰 Текущая цена: \(.price.price) ₽
+Product ID: \(.product_id)
+💰 Цена продавца: \(.price.price) ₽
 🏷️  Старая цена: \(.price.old_price // "не указана") ₽
+🏷 Цена акции продавца: \(.price.marketing_seller_price // "не указана") ₽
 📉 Мин. цена: \(.price.min_price // "не указана") ₽
-💳 Цена с картой: \(.price.premium_price // "не указана") ₽"'
+💸 Комиссия FBO: \(.commissions.sales_percent_fbo // "не указана")%"'
 }
 
 # Форматировать список остатков
@@ -243,8 +245,9 @@ format_price() {
 format_stocks() {
     local json=$1
     local show_low=${2:-false}
+    local threshold=${3:-10}
     
-    local count=$(echo "$json" | jq -r '.result.rows | length' 2>/dev/null)
+    local count=$(echo "$json" | jq -r '.items | length' 2>/dev/null)
     
     if [[ -z "$count" ]] || [[ "$count" == "0" ]] || [[ "$count" == "null" ]]; then
         echo "Нет данных об остатках"
@@ -252,24 +255,26 @@ format_stocks() {
     fi
     
     if [[ "$show_low" == "true" ]]; then
-        echo "⚠️  Товары с низкими остатками (< 10 шт):"
+        echo "⚠️  Товары с низкими остатками (< ${threshold} шт):"
     else
-        echo "📊 Остатки на складах (всего позиций: $count):"
+        echo "📊 Остатки FBO на складах (всего позиций: $count):"
     fi
     echo ""
     
-    local filter='.'
-    if [[ "$show_low" == "true" ]]; then
-        filter='select(.stock < 10)'
-    fi
-    
-    echo "$json" | jq -r '.result.rows[] | '"$filter"' | 
-"SKU: \(.sku)
-📦 Название: \(.name // "не указано")
-📊 Остаток: \(.stock) шт" +
-(if .stock < 10 then "\n⚠️  НИЗКИЙ ОСТАТОК!" else "" end) + "
-🏢 Склад: \(.warehouse_name // "не указан")
----"'
+    echo "$json" | jq -r --argjson low "$([[ "$show_low" == "true" ]] && echo true || echo false)" --argjson threshold "$threshold" '
+        .items[]
+        | . as $item
+        | (([.stocks[]? | select(.type=="fbo") | .present] | add) // 0) as $present
+        | (([.stocks[]? | select(.type=="fbo") | .reserved] | add) // 0) as $reserved
+        | select(($low == false) or ($present < $threshold))
+        | "SKU: \($item.offer_id)
+Product ID: \($item.product_id)
+📊 FBO остаток: \($present) шт
+🔒 Резерв: \($reserved) шт" +
+          (if $present < $threshold then "
+⚠️  НИЗКИЙ ОСТАТОК!" else "" end) + "
+---"
+    '
 }
 
 # Конвертировать ISO дату в человеческий формат
