@@ -12,6 +12,7 @@ BASE_DIR = Path.home() / "lobster-marketplace"
 TELEGRAM_ENV = Path.home() / ".openclaw" / "lobster" / "telegram.env"
 REPORT_SCRIPT = BASE_DIR / "lobster" / "reports" / "daily_ozon_report.sh"
 STOCK_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_stock_report.sh"
+SKU_SEARCH_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_sku_search.sh"
 
 
 def load_env_file(path: Path) -> dict:
@@ -112,6 +113,8 @@ ALERTS_MENU = keyboard([
     [("⬅️ Назад", "menu:main")],
 ])
 
+WAITING_FOR_SKU_SEARCH = set()
+
 SETTINGS_MENU = keyboard([
     [("Порог низких остатков", "settings:stock_threshold")],
     [("Время ежедневного отчета", "settings:daily_report_time")],
@@ -187,6 +190,32 @@ def run_stock_report(mode: str, threshold: str = "15") -> str:
     except Exception as error:
         return f"ERROR: {error}"
 
+
+def run_sku_search(query: str) -> str:
+    query = query.strip()
+
+    if not query:
+        return "Введите offer_id или product_id для поиска."
+
+    try:
+        result = subprocess.run(
+            [str(SKU_SEARCH_SCRIPT), query],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.stdout.strip() or "SKU не найден."
+
+    except subprocess.TimeoutExpired:
+        return "ERROR: поиск SKU выполнялся слишком долго и был остановлен."
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr.strip()
+        stdout = error.stdout.strip()
+        return "ERROR: не удалось выполнить поиск SKU.\n\n" + (stderr or stdout or str(error))
+    except Exception as error:
+        return f"ERROR: {error}"
+
 def handle_callback(chat_id: str, callback_data: str) -> None:
     if callback_data == "menu:main":
         send_message(chat_id, main_menu_text(), MAIN_MENU)
@@ -224,10 +253,25 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
             REPORTS_MENU,
         )
 
-    elif callback_data.startswith("sku:"):
+    elif callback_data == "sku:search":
+        WAITING_FOR_SKU_SEARCH.add(chat_id)
         send_message(
             chat_id,
-            "📦 Раздел SKU пока работает как заглушка.\n\nСледующий этап: поиск по offer_id / артикулу / названию.",
+            "📦 Поиск SKU\n\nВведите offer_id или product_id.\nНапример: FBR или 3549918769",
+            SKU_MENU,
+        )
+
+    elif callback_data == "sku:top":
+        send_message(
+            chat_id,
+            "📦 Топ продаж пока не подключен.\n\nСледующий этап: подключить данные заказов/продаж.",
+            SKU_MENU,
+        )
+
+    elif callback_data == "sku:problem":
+        send_message(
+            chat_id,
+            "📦 Проблемные SKU пока частично доступны через раздел 🚨 Алерты и 🏬 Остатки.",
             SKU_MENU,
         )
 
@@ -272,16 +316,30 @@ def handle_message(chat_id: str, text: str) -> None:
     normalized = text.strip().lower()
 
     if normalized in {"/start", "start", "меню", "/menu"}:
+        WAITING_FOR_SKU_SEARCH.discard(chat_id)
         send_message(chat_id, main_menu_text(), MAIN_MENU)
+
+    elif chat_id in WAITING_FOR_SKU_SEARCH:
+        WAITING_FOR_SKU_SEARCH.discard(chat_id)
+        send_message(chat_id, "🔄 Ищу SKU...")
+        send_message(chat_id, run_sku_search(text), SKU_MENU)
+
+    elif normalized.startswith("sku "):
+        query = text.strip()[4:].strip()
+        send_message(chat_id, "🔄 Ищу SKU...")
+        send_message(chat_id, run_sku_search(query), SKU_MENU)
+
     elif "отчет" in normalized and "сегодня" in normalized:
         send_message(chat_id, "🔄 Формирую отчет за сегодня...")
         send_message(chat_id, run_today_report(), REPORTS_MENU)
+
     else:
         send_message(
             chat_id,
             "Пока я понимаю команды:\n"
             "/start — открыть меню\n"
-            "отчет сегодня — сформировать отчет за сегодня",
+            "отчет сегодня — сформировать отчет за сегодня\n"
+            "sku FBR — найти SKU по offer_id/product_id",
             MAIN_MENU,
         )
 
