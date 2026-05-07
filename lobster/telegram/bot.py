@@ -10,6 +10,7 @@ from pathlib import Path
 
 BASE_DIR = Path.home() / "lobster-marketplace"
 TELEGRAM_ENV = Path.home() / ".openclaw" / "lobster" / "telegram.env"
+BOT_SETTINGS_ENV = BASE_DIR / "lobster" / "config" / "bot_settings.env"
 REPORT_SCRIPT = BASE_DIR / "lobster" / "reports" / "daily_ozon_report.sh"
 STOCK_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_stock_report.sh"
 SKU_SEARCH_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_sku_search.sh"
@@ -121,6 +122,22 @@ SETTINGS_MENU = keyboard([
     [("Магазины", "settings:stores")],
     [("⬅️ Назад", "menu:main")],
 ])
+
+
+
+
+def get_bot_setting(key: str, default: str) -> str:
+    try:
+        settings = load_env_file(BOT_SETTINGS_ENV)
+        value = settings.get(key, default)
+        return str(value).strip() or default
+    except Exception:
+        return default
+
+
+def get_stock_threshold() -> str:
+    value = get_bot_setting("STOCK_THRESHOLD", "15")
+    return value if value.isdigit() else "15"
 
 
 def main_menu_text() -> str:
@@ -277,34 +294,49 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
 
     elif callback_data == "stock:low":
         send_message(chat_id, "🔄 Получаю низкие остатки...")
-        send_message(chat_id, run_stock_report("low", "15"), STOCK_MENU)
+        send_message(chat_id, run_stock_report("low", get_stock_threshold()), STOCK_MENU)
 
     elif callback_data == "stock:zero":
         send_message(chat_id, "🔄 Получаю товары с нулевым остатком...")
-        send_message(chat_id, run_stock_report("zero", "15"), STOCK_MENU)
+        send_message(chat_id, run_stock_report("zero", get_stock_threshold()), STOCK_MENU)
 
     elif callback_data == "stock:roast_request":
         send_message(chat_id, "🔄 Формирую roast request...")
-        send_message(chat_id, run_stock_report("roast", "15"), STOCK_MENU)
+        send_message(chat_id, run_stock_report("roast", get_stock_threshold()), STOCK_MENU)
 
     elif callback_data == "alerts:all":
         send_message(chat_id, "🔄 Собираю активные алерты...")
-        send_message(chat_id, run_stock_report("alerts", "15"), ALERTS_MENU)
+        send_message(chat_id, run_stock_report("alerts", get_stock_threshold()), ALERTS_MENU)
 
     elif callback_data == "alerts:stock":
         send_message(chat_id, "🔄 Собираю алерты по остаткам...")
-        send_message(chat_id, run_stock_report("alerts", "15"), ALERTS_MENU)
+        send_message(chat_id, run_stock_report("alerts", get_stock_threshold()), ALERTS_MENU)
 
     elif callback_data == "alerts:reports":
-        send_message(chat_id, run_stock_report("alerts_reports", "15"), ALERTS_MENU)
+        send_message(chat_id, run_stock_report("alerts_reports", get_stock_threshold()), ALERTS_MENU)
 
     elif callback_data == "alerts:missing_sku":
-        send_message(chat_id, run_stock_report("missing_sku", "15"), ALERTS_MENU)
+        send_message(chat_id, run_stock_report("missing_sku", get_stock_threshold()), ALERTS_MENU)
 
-    elif callback_data.startswith("settings:"):
+    elif callback_data == "settings:stock_threshold":
         send_message(
             chat_id,
-            "⚙️ Настройки пока работают как заглушка.\n\nСледующий этап: хранить пороги и время отчета в config.",
+            f"🏬 Порог низких остатков\n\nТекущий порог: < {get_stock_threshold()} шт.\n\nПока изменение через Telegram не подключено.\nФайл настроек: lobster/config/bot_settings.env",
+            SETTINGS_MENU,
+        )
+
+    elif callback_data == "settings:daily_report_time":
+        daily_report_time = get_bot_setting("DAILY_REPORT_TIME", "10:00")
+        send_message(
+            chat_id,
+            f"📊 Время ежедневного отчета\n\nТекущее значение: {daily_report_time}\n\nСейчас cron отдельно отправляет отчет в 10:00.",
+            SETTINGS_MENU,
+        )
+
+    elif callback_data == "settings:stores":
+        send_message(
+            chat_id,
+            "🏪 Магазины\n\nСейчас подключен контур Ozon / Elevator через текущие Ozon credentials.",
             SETTINGS_MENU,
         )
 
