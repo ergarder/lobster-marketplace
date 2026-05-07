@@ -260,6 +260,39 @@ def read_saved_daily_report(days_ago: int) -> str:
 
     return text[:3900]
 
+
+def read_weekly_report_index(days: int = 7) -> str:
+    lines = [
+        "📊 Отчеты за последние 7 дней",
+        "",
+    ]
+
+    found_count = 0
+    missing_count = 0
+
+    for days_ago in range(0, days):
+        report_date = date.today() - timedelta(days=days_ago)
+        report_file = REPORT_LOG_DIR / f"daily_ozon_report_{report_date.isoformat()}.txt"
+
+        if report_file.exists() and report_file.stat().st_size > 0:
+            found_count += 1
+            lines.append(f"✅ {report_date.isoformat()} — найден")
+        else:
+            missing_count += 1
+            lines.append(f"❌ {report_date.isoformat()} — нет файла")
+
+    lines.extend([
+        "",
+        f"Итого:",
+        f"— найдено отчетов: {found_count}",
+        f"— отсутствует: {missing_count}",
+        "",
+        "MVP-режим: сейчас недельный раздел показывает наличие сохраненных daily-отчетов.",
+        "Следующий этап: собрать агрегированный недельный отчет по остаткам и алертам.",
+    ])
+
+    return "\n".join(lines)[:3900]
+
 def run_stock_report(mode: str, threshold: str = "15") -> str:
     try:
         result = subprocess.run(
@@ -333,11 +366,7 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
         send_message(chat_id, read_saved_daily_report(1), REPORTS_MENU)
 
     elif callback_data == "reports:week":
-        send_message(
-            chat_id,
-            "📊 Недельный отчет пока не подключен.\n\nСледующий этап: собрать агрегат за 7 дней.",
-            REPORTS_MENU,
-        )
+        send_message(chat_id, read_weekly_report_index(7), REPORTS_MENU)
 
     elif callback_data == "sku:search":
         WAITING_FOR_SKU_SEARCH.add(chat_id)
@@ -452,6 +481,9 @@ def handle_message(chat_id: str, text: str) -> None:
 
     elif "отчет" in normalized and "вчера" in normalized:
         send_message(chat_id, read_saved_daily_report(1), REPORTS_MENU)
+
+    elif "отчет" in normalized and ("неделя" in normalized or "7" in normalized):
+        send_message(chat_id, read_weekly_report_index(7), REPORTS_MENU)
 
     else:
         send_message(
