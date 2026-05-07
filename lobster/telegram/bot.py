@@ -123,6 +123,12 @@ SETTINGS_MENU = keyboard([
     [("⬅️ Назад", "menu:main")],
 ])
 
+STOCK_THRESHOLD_MENU = keyboard([
+    [("10 шт", "settings:set_stock_threshold:10"), ("15 шт", "settings:set_stock_threshold:15")],
+    [("20 шт", "settings:set_stock_threshold:20"), ("30 шт", "settings:set_stock_threshold:30")],
+    [("⬅️ Назад", "menu:settings")],
+])
+
 
 
 
@@ -138,6 +144,44 @@ def get_bot_setting(key: str, default: str) -> str:
 def get_stock_threshold() -> str:
     value = get_bot_setting("STOCK_THRESHOLD", "15")
     return value if value.isdigit() else "15"
+
+
+def set_bot_setting(key: str, value: str) -> None:
+    BOT_SETTINGS_ENV.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = []
+    found = False
+
+    if BOT_SETTINGS_ENV.exists():
+        lines = BOT_SETTINGS_ENV.read_text().splitlines()
+
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            new_lines.append(line)
+            continue
+
+        current_key, _ = line.split("=", 1)
+        if current_key.strip() == key:
+            new_lines.append(f"{key}={value}")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        new_lines.append(f"{key}={value}")
+
+    BOT_SETTINGS_ENV.write_text("\n".join(new_lines) + "\n")
+
+
+def set_stock_threshold(value: str) -> bool:
+    if value not in {"5", "10", "15", "20", "30", "50"}:
+        return False
+
+    set_bot_setting("STOCK_THRESHOLD", value)
+    return True
 
 
 def main_menu_text() -> str:
@@ -321,9 +365,25 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
     elif callback_data == "settings:stock_threshold":
         send_message(
             chat_id,
-            f"🏬 Порог низких остатков\n\nТекущий порог: < {get_stock_threshold()} шт.\n\nПока изменение через Telegram не подключено.\nФайл настроек: lobster/config/bot_settings.env",
-            SETTINGS_MENU,
+            f"🏬 Порог низких остатков\n\nТекущий порог: < {get_stock_threshold()} шт.\n\nВыбери новый порог:",
+            STOCK_THRESHOLD_MENU,
         )
+
+    elif callback_data.startswith("settings:set_stock_threshold:"):
+        new_threshold = callback_data.split(":")[-1]
+
+        if set_stock_threshold(new_threshold):
+            send_message(
+                chat_id,
+                f"✅ Порог низких остатков обновлен: < {new_threshold} шт.",
+                SETTINGS_MENU,
+            )
+        else:
+            send_message(
+                chat_id,
+                "ERROR: недопустимое значение порога.",
+                STOCK_THRESHOLD_MENU,
+            )
 
     elif callback_data == "settings:daily_report_time":
         daily_report_time = get_bot_setting("DAILY_REPORT_TIME", "10:00")
