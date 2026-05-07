@@ -53,6 +53,7 @@ jq -n -r \
 
   ($rows | map(select(.stock == 0))) as $zero_rows |
   ($rows | map(select(.stock > 0 and .stock < $threshold_num))) as $low_rows |
+  (($zero_rows | length) + ($low_rows | length)) as $stock_alerts_count |
 
   if $mode == "zero" then
     "❌ Закончились",
@@ -84,6 +85,43 @@ jq -n -r \
       end
     )
 
+  elif $mode == "alerts" then
+    "🚨 Активные алерты",
+    "",
+    "Всего stock-алертов: \($stock_alerts_count)",
+    "— Нулевой остаток: \($zero_rows | length)",
+    "— Низкий остаток < \($threshold_num) шт: \($low_rows | length)",
+    "",
+    "❌ Критично — остаток 0:",
+    (
+      if ($zero_rows | length) == 0 then
+        "— нет"
+      else
+        ($zero_rows[] | "— \(.offer_id): \(.stock) шт, резерв \(.reserved) шт")
+      end
+    ),
+    "",
+    "⚠️ Низкий остаток:",
+    (
+      if ($low_rows | length) == 0 then
+        "— нет"
+      else
+        ($low_rows[] | "— \(.offer_id): \(.stock) шт, резерв \(.reserved) шт")
+      end
+    )
+
+  elif $mode == "alerts_reports" then
+    "📊 Алерты отчетов",
+    "",
+    "Пока проверяется только наличие Telegram/Ozon отчетного контура.",
+    "Следующий этап: проверять наличие файла daily_ozon_report за сегодня и ошибки cron."
+
+  elif $mode == "missing_sku" then
+    "📦 SKU без данных",
+    "",
+    "Пока не подключено.",
+    "Следующий этап: сверять список SKU из каталога с ответами Ozon stocks/prices."
+
   else
     "⚠️ Низкие остатки",
     "",
@@ -97,6 +135,6 @@ jq -n -r \
       end
     )
   end
-' 
+'
 
 rm -f "$tmp_stocks"

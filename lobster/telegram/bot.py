@@ -243,12 +243,19 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
         send_message(chat_id, "🔄 Формирую roast request...")
         send_message(chat_id, run_stock_report("roast", "15"), STOCK_MENU)
 
-    elif callback_data.startswith("alerts:"):
-        send_message(
-            chat_id,
-            "🚨 Раздел алертов пока работает как заглушка.\n\nСледующий этап: low_stock, out_of_stock, missing_data.",
-            ALERTS_MENU,
-        )
+    elif callback_data == "alerts:all":
+        send_message(chat_id, "🔄 Собираю активные алерты...")
+        send_message(chat_id, run_stock_report("alerts", "15"), ALERTS_MENU)
+
+    elif callback_data == "alerts:stock":
+        send_message(chat_id, "🔄 Собираю алерты по остаткам...")
+        send_message(chat_id, run_stock_report("alerts", "15"), ALERTS_MENU)
+
+    elif callback_data == "alerts:reports":
+        send_message(chat_id, run_stock_report("alerts_reports", "15"), ALERTS_MENU)
+
+    elif callback_data == "alerts:missing_sku":
+        send_message(chat_id, run_stock_report("missing_sku", "15"), ALERTS_MENU)
 
     elif callback_data.startswith("settings:"):
         send_message(
