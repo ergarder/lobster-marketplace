@@ -11,6 +11,7 @@ from pathlib import Path
 BASE_DIR = Path.home() / "lobster-marketplace"
 TELEGRAM_ENV = Path.home() / ".openclaw" / "lobster" / "telegram.env"
 REPORT_SCRIPT = BASE_DIR / "lobster" / "reports" / "daily_ozon_report.sh"
+STOCK_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_stock_report.sh"
 
 
 def load_env_file(path: Path) -> dict:
@@ -165,6 +166,27 @@ def run_today_report() -> str:
         return f"ERROR: {error}"
 
 
+
+def run_stock_report(mode: str, threshold: str = "15") -> str:
+    try:
+        result = subprocess.run(
+            [str(STOCK_SCRIPT), mode, threshold],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return result.stdout.strip() or "Данных по остаткам нет."
+
+    except subprocess.TimeoutExpired:
+        return "ERROR: отчет по остаткам формировался слишком долго и был остановлен."
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr.strip()
+        stdout = error.stdout.strip()
+        return "ERROR: не удалось сформировать отчет по остаткам.\n\n" + (stderr or stdout or str(error))
+    except Exception as error:
+        return f"ERROR: {error}"
+
 def handle_callback(chat_id: str, callback_data: str) -> None:
     if callback_data == "menu:main":
         send_message(chat_id, main_menu_text(), MAIN_MENU)
@@ -209,12 +231,17 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
             SKU_MENU,
         )
 
-    elif callback_data.startswith("stock:"):
-        send_message(
-            chat_id,
-            "🏬 Раздел остатков пока работает как заглушка.\n\nСледующий этап: вынести остатки из daily report в отдельный метод.",
-            STOCK_MENU,
-        )
+    elif callback_data == "stock:low":
+        send_message(chat_id, "🔄 Получаю низкие остатки...")
+        send_message(chat_id, run_stock_report("low", "15"), STOCK_MENU)
+
+    elif callback_data == "stock:zero":
+        send_message(chat_id, "🔄 Получаю товары с нулевым остатком...")
+        send_message(chat_id, run_stock_report("zero", "15"), STOCK_MENU)
+
+    elif callback_data == "stock:roast_request":
+        send_message(chat_id, "🔄 Формирую roast request...")
+        send_message(chat_id, run_stock_report("roast", "15"), STOCK_MENU)
 
     elif callback_data.startswith("alerts:"):
         send_message(
