@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+BASE_DIR = Path.home() / "lobster-marketplace"
+TELEGRAM_ENV = Path.home() / ".openclaw" / "lobster" / "telegram.env"
+REPORT_SCRIPT = BASE_DIR / "lobster" / "reports" / "daily_ozon_report.sh"
+
+
+def load_env_file(path: Path) -> dict:
+    env = {}
+    if not path.exists():
+        raise RuntimeError(f"Telegram env file not found: {path}")
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        value = value.strip().strip('"').strip("'")
+        env[key.strip()] = value
+
+    return env
+
+
+ENV = load_env_file(TELEGRAM_ENV)
+BOT_TOKEN = ENV.get("TELEGRAM_BOT_TOKEN", "")
+ALLOWED_CHAT_ID = str(ENV.get("TELEGRAM_CHAT_ID", ""))
+
+if not BOT_TOKEN or not ALLOWED_CHAT_ID:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is empty")
+
+API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def api_call(method: str, data: dict | None = None) -> dict:
+    url = f"{API_BASE}/{method}"
+    encoded = urllib.parse.urlencode(data or {}).encode()
+
+    request = urllib.request.Request(url, data=encoded, method="POST")
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def send_message(chat_id: str, text: str, reply_markup: dict | None = None) -> None:
+    payload = {
+        "chat_id": chat_id,
+        "text": text[:3900],
+        "disable_web_page_preview": "true",
+    }
+
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+
+    api_call("sendMessage", payload)
+
+
+def answer_callback(callback_query_id: str) -> None:
+    api_call("answerCallbackQuery", {"callback_query_id": callback_query_id})
+
+
+def keyboard(rows: list[list[tuple[str, str]]]) -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": text, "callback_data": callback_data} for text, callback_data in row]
+            for row in rows
+        ]
+    }
+
+
+MAIN_MENU = keyboard([
+    [("📊 Отчеты", "menu:reports")],
+    [("📦 SKU / товары", "menu:sku")],
+    [("🏬 Остатки", "menu:stock")],
+    [("🚨 Алерты", "menu:alerts")],
+    [("⚙️ Настройки", "menu:settings")],
+])
+
+REPORTS_MENU = keyboard([
+    [("Сегодня", "reports:today"), ("Вчера", "reports:yesterday")],
+    [("Неделя", "reports:week")],
+    [("⬅️ Назад", "menu:main")],
+])
+
+SKU_MENU = keyboard([
+    [("Найти SKU", "sku:search")],
+    [("Топ продаж", "sku:top")],
+    [("Проблемные SKU", "sku:problem")],
+    [("⬅️ Назад", "menu:main")],
+])
+
+STOCK_MENU = keyboard([
+    [("Низкие остатки", "stock:low")],
+    [("Закончились", "stock:zero")],
+    [("Roast request", "stock:roast_request")],
+    [("⬅️ Назад", "menu:main")],
+])
+
+ALERTS_MENU = keyboard([
+    [("Все активные", "alerts:all")],
+    [("Остатки", "alerts:stock")],
+    [("Отчеты", "alerts:reports")],
+    [("SKU без данных", "alerts:missing_sku")],
+    [("⬅️ Назад", "menu:main")],
+])
+
+SETTINGS_MENU = keyboard([
+    [("Порог низких остатков", "settings:stock_threshold")],
+    [("Время ежедневного отчета", "settings:daily_report_time")],
+    [("Магазины", "settings:stores")],
+    [("⬅️ Назад", "menu:main")],
+])
+
+
+def main_menu_text() -> str:
+    return (
+        "🦞 Lobster Bot\n\n"
+        "Главное меню MVP-1.\n"
+        "Выбери раздел:"
+    )
+
+
+def run_today_report() -> str:
+    try:
+        result = subprocess.run(
+            [str(REPORT_SCRIPT), "15"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+
+        output = result.stdout.strip()
+
+        # daily_ozon_report.sh сейчас пишет служебные строки:
+        # 🔄 Получаю цены Ozon...
+        # 🔄 Получаю остатки Ozon...
+        # 🧮 Формирую отчет...
+        # Отчет сохранен...
+        # Оставляем полезную часть начиная с заголовка.
+        marker = "🦞 Lobster / Ozon / Elevator"
+        if marker in output:
+            output = output[output.index(marker):]
+
+        saved_marker = "\nОтчет сохранен:"
+        if saved_marker in output:
+            output = output.split(saved_marker)[0].strip()
+
+        return output or "Отчет сформирован, но текст пустой."
+
+    except subprocess.TimeoutExpired:
+        return "ERROR: отчет формировался слишком долго и был остановлен."
+    except subprocess.CalledProcessError as error:
+        stderr = error.stderr.strip()
+        stdout = error.stdout.strip()
+        return "ERROR: не удалось сформировать отчет.\n\n" + (stderr or stdout or str(error))
+    except Exception as error:
+        return f"ERROR: {error}"
+
+
+def handle_callback(chat_id: str, callback_data: str) -> None:
+    if callback_data == "menu:main":
+        send_message(chat_id, main_menu_text(), MAIN_MENU)
+
+    elif callback_data == "menu:reports":
+        send_message(chat_id, "📊 Отчеты\n\nВыбери период:", REPORTS_MENU)
+
+    elif callback_data == "menu:sku":
+        send_message(chat_id, "📦 SKU / товары\n\nРаздел поиска и диагностики товаров.", SKU_MENU)
+
+    elif callback_data == "menu:stock":
+        send_message(chat_id, "🏬 Остатки\n\nРаздел контроля остатков и roast request.", STOCK_MENU)
+
+    elif callback_data == "menu:alerts":
+        send_message(chat_id, "🚨 Алерты\n\nРаздел активных проблем.", ALERTS_MENU)
+
+    elif callback_data == "menu:settings":
+        send_message(chat_id, "⚙️ Настройки\n\nБазовые настройки MVP-1.", SETTINGS_MENU)
+
+    elif callback_data == "reports:today":
+        send_message(chat_id, "🔄 Формирую отчет за сегодня...")
+        send_message(chat_id, run_today_report(), REPORTS_MENU)
+
+    elif callback_data == "reports:yesterday":
+        send_message(
+            chat_id,
+            "📊 Отчет за вчера пока не подключен.\n\nСледующий этап: добавить параметр даты в report script.",
+            REPORTS_MENU,
+        )
+
+    elif callback_data == "reports:week":
+        send_message(
+            chat_id,
+            "📊 Недельный отчет пока не подключен.\n\nСледующий этап: собрать агрегат за 7 дней.",
+            REPORTS_MENU,
+        )
+
+    elif callback_data.startswith("sku:"):
+        send_message(
+            chat_id,
+            "📦 Раздел SKU пока работает как заглушка.\n\nСледующий этап: поиск по offer_id / артикулу / названию.",
+            SKU_MENU,
+        )
+
+    elif callback_data.startswith("stock:"):
+        send_message(
+            chat_id,
+            "🏬 Раздел остатков пока работает как заглушка.\n\nСледующий этап: вынести остатки из daily report в отдельный метод.",
+            STOCK_MENU,
+        )
+
+    elif callback_data.startswith("alerts:"):
+        send_message(
+            chat_id,
+            "🚨 Раздел алертов пока работает как заглушка.\n\nСледующий этап: low_stock, out_of_stock, missing_data.",
+            ALERTS_MENU,
+        )
+
+    elif callback_data.startswith("settings:"):
+        send_message(
+            chat_id,
+            "⚙️ Настройки пока работают как заглушка.\n\nСледующий этап: хранить пороги и время отчета в config.",
+            SETTINGS_MENU,
+        )
+
+    else:
+        send_message(chat_id, "Неизвестная команда.", MAIN_MENU)
+
+
+def handle_message(chat_id: str, text: str) -> None:
+    normalized = text.strip().lower()
+
+    if normalized in {"/start", "start", "меню", "/menu"}:
+        send_message(chat_id, main_menu_text(), MAIN_MENU)
+    elif "отчет" in normalized and "сегодня" in normalized:
+        send_message(chat_id, "🔄 Формирую отчет за сегодня...")
+        send_message(chat_id, run_today_report(), REPORTS_MENU)
+    else:
+        send_message(
+            chat_id,
+            "Пока я понимаю команды:\n"
+            "/start — открыть меню\n"
+            "отчет сегодня — сформировать отчет за сегодня",
+            MAIN_MENU,
+        )
+
+
+def run_bot() -> None:
+    print("Lobster Telegram bot started")
+    offset = None
+
+    while True:
+        try:
+            payload = {"timeout": 30}
+            if offset is not None:
+                payload["offset"] = offset
+
+            response = api_call("getUpdates", payload)
+
+            for update in response.get("result", []):
+                offset = update["update_id"] + 1
+
+                if "message" in update:
+                    message = update["message"]
+                    chat_id = str(message["chat"]["id"])
+
+                    if chat_id != ALLOWED_CHAT_ID:
+                        send_message(chat_id, "Access denied.")
+                        continue
+
+                    text = message.get("text", "")
+                    handle_message(chat_id, text)
+
+                elif "callback_query" in update:
+                    callback = update["callback_query"]
+                    answer_callback(callback["id"])
+
+                    message = callback.get("message", {})
+                    chat_id = str(message.get("chat", {}).get("id", ""))
+
+                    if chat_id != ALLOWED_CHAT_ID:
+                        send_message(chat_id, "Access denied.")
+                        continue
+
+                    handle_callback(chat_id, callback.get("data", ""))
+
+        except KeyboardInterrupt:
+            print("Bot stopped")
+            break
+        except Exception as error:
+            print(f"ERROR: {error}")
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    run_bot()
