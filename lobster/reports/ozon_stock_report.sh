@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${1:-low}"
+REPORT_MODE="${1:-low}"
 THRESHOLD="${2:-15}"
 
 if ! [[ "$THRESHOLD" =~ ^[0-9]+$ ]]; then
@@ -29,12 +29,22 @@ stocks_json="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "https://api-
   -H "Content-Type: application/json" \
   -d '{"filter":{"visibility":"ALL"},"limit":1000}')"
 
+prices_json="$(curl -sS --connect-timeout 10 --max-time 30 -X POST "https://api-seller.ozon.ru/v5/product/info/prices" \
+  -H "Client-Id: $OZON_CLIENT_ID" \
+  -H "Api-Key: $OZON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"filter":{"visibility":"ALL"},"limit":1000}')"
+
 tmp_stocks="$(mktemp)"
+tmp_prices="$(mktemp)"
+
 echo "$stocks_json" > "$tmp_stocks"
+echo "$prices_json" > "$tmp_prices"
 
 jq -n -r \
   --slurpfile stocks "$tmp_stocks" \
-  --arg mode "$MODE" \
+  --slurpfile prices "$tmp_prices" \
+  --arg mode "$REPORT_MODE" \
   --arg threshold "$THRESHOLD" '
   ($threshold | tonumber) as $threshold_num |
 
@@ -44,15 +54,36 @@ jq -n -r \
   def fbo_reserved:
     ([.stocks[]? | select(.type == "fbo") | .reserved] | add) // 0;
 
-  ($stocks[0].items // [] | map({
-    offer_id: .offer_id,
-    product_id: .product_id,
+  ($prices[0].items // []) as $price_items |
+  ($stocks[0].items // []) as $stock_items |
+
+  ($price_items | map({
+    key: (.offer_id | tostring),
+    value: {
+      price: ((.price.price // 0) | tonumber),
+      marketing_price: ((.price.marketing_seller_price // 0) | tonumber),
+      min_price: ((.price.min_price // 0) | tonumber),
+      old_price: ((.price.old_price // 0) | tonumber),
+      commission_fbo: ((.commissions.sales_percent_fbo // 0) | tonumber)
+    }
+  }) | from_entries) as $price_map |
+
+  ($stock_items | map({
+    offer_id: (.offer_id | tostring),
+    product_id: (.product_id | tostring),
     stock: fbo_present,
-    reserved: fbo_reserved
+    reserved: fbo_reserved,
+    price: (($price_map[(.offer_id | tostring)].price // 0) | tonumber),
+    marketing_price: (($price_map[(.offer_id | tostring)].marketing_price // 0) | tonumber),
+    min_price: (($price_map[(.offer_id | tostring)].min_price // 0) | tonumber),
+    old_price: (($price_map[(.offer_id | tostring)].old_price // 0) | tonumber),
+    commission_fbo: (($price_map[(.offer_id | tostring)].commission_fbo // 0) | tonumber),
+    has_price_data: ($price_map[(.offer_id | tostring)] != null)
   })) as $rows |
 
   ($rows | map(select(.stock == 0))) as $zero_rows |
   ($rows | map(select(.stock > 0 and .stock < $threshold_num))) as $low_rows |
+  ($rows | map(select(.has_price_data == true and .min_price > 0 and .price > 0 and .price < .min_price))) as $below_min_price_rows |
   (($zero_rows | length) + ($low_rows | length)) as $stock_alerts_count |
 
   if $mode == "zero" then
@@ -110,6 +141,43 @@ jq -n -r \
       end
     )
 
+  elif $mode == "problem_sku" then
+    "📦 Проблемные SKU",
+    "",
+    "Порог низкого остатка: < \($threshold_num) шт",
+    "",
+    "Сводка:",
+    "— Нулевой остаток: \($zero_rows | length)",
+    "— Низкий остаток: \($low_rows | length)",
+    "— Цена ниже минимальной: \($below_min_price_rows | length)",
+    "",
+    "❌ Остаток 0:",
+    (
+      if ($zero_rows | length) == 0 then
+        "— нет"
+      else
+        ($zero_rows[0:10][] | "— \(.offer_id): остаток \(.stock) шт, резерв \(.reserved) шт, цена \(.price) ₽")
+      end
+    ),
+    "",
+    "⚠️ Низкий остаток:",
+    (
+      if ($low_rows | length) == 0 then
+        "— нет"
+      else
+        ($low_rows[0:10][] | "— \(.offer_id): остаток \(.stock) шт, резерв \(.reserved) шт, цена \(.price) ₽")
+      end
+    ),
+    "",
+    "💰 Цена ниже минимальной:",
+    (
+      if ($below_min_price_rows | length) == 0 then
+        "— нет"
+      else
+        ($below_min_price_rows[0:10][] | "— \(.offer_id): цена \(.price) ₽, мин. цена \(.min_price) ₽")
+      end
+    )
+
   elif $mode == "alerts_reports" then
     "📊 Алерты отчетов",
     "",
@@ -137,4 +205,4 @@ jq -n -r \
   end
 '
 
-rm -f "$tmp_stocks"
+rm -f "$tmp_stocks" "$tmp_prices"
