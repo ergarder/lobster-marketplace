@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import date, timedelta
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -12,6 +13,7 @@ BASE_DIR = Path.home() / "lobster-marketplace"
 TELEGRAM_ENV = Path.home() / ".openclaw" / "lobster" / "telegram.env"
 BOT_SETTINGS_ENV = BASE_DIR / "lobster" / "config" / "bot_settings.env"
 REPORT_SCRIPT = BASE_DIR / "lobster" / "reports" / "daily_ozon_report.sh"
+REPORT_LOG_DIR = BASE_DIR / "lobster" / "logs"
 STOCK_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_stock_report.sh"
 SKU_SEARCH_SCRIPT = BASE_DIR / "lobster" / "reports" / "ozon_sku_search.sh"
 
@@ -231,6 +233,33 @@ def run_today_report() -> str:
 
 
 
+
+def read_saved_daily_report(days_ago: int) -> str:
+    report_date = date.today() - timedelta(days=days_ago)
+    report_file = REPORT_LOG_DIR / f"daily_ozon_report_{report_date.isoformat()}.txt"
+
+    if not report_file.exists():
+        return (
+            f"📊 Отчет за {report_date.isoformat()} не найден.\n\n"
+            f"Ожидаемый файл:\n{report_file}\n\n"
+            "Исторический отчет можно показать только если он был сохранен в logs."
+        )
+
+    text = report_file.read_text().strip()
+
+    if not text:
+        return f"📊 Отчет за {report_date.isoformat()} найден, но файл пустой."
+
+    marker = "🦞 Lobster / Ozon / Elevator"
+    if marker in text:
+        text = text[text.index(marker):]
+
+    saved_marker = "\nОтчет сохранен:"
+    if saved_marker in text:
+        text = text.split(saved_marker)[0].strip()
+
+    return text[:3900]
+
 def run_stock_report(mode: str, threshold: str = "15") -> str:
     try:
         result = subprocess.run(
@@ -301,11 +330,7 @@ def handle_callback(chat_id: str, callback_data: str) -> None:
         send_message(chat_id, run_today_report(), REPORTS_MENU)
 
     elif callback_data == "reports:yesterday":
-        send_message(
-            chat_id,
-            "📊 Отчет за вчера пока не подключен.\n\nСледующий этап: добавить параметр даты в report script.",
-            REPORTS_MENU,
-        )
+        send_message(chat_id, read_saved_daily_report(1), REPORTS_MENU)
 
     elif callback_data == "reports:week":
         send_message(
@@ -424,6 +449,9 @@ def handle_message(chat_id: str, text: str) -> None:
     elif "отчет" in normalized and "сегодня" in normalized:
         send_message(chat_id, "🔄 Формирую отчет за сегодня...")
         send_message(chat_id, run_today_report(), REPORTS_MENU)
+
+    elif "отчет" in normalized and "вчера" in normalized:
+        send_message(chat_id, read_saved_daily_report(1), REPORTS_MENU)
 
     else:
         send_message(
